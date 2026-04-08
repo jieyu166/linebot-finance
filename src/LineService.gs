@@ -36,6 +36,19 @@ function replyToLine(replyToken, messageText) {
 }
 
 /**
+ * 驗證 LINE Webhook 簽章
+ * @param {string} body - 原始 request body
+ * @param {string} signature - x-line-signature header 值
+ * @returns {boolean} 簽章是否有效
+ */
+function verifyLineSignature(body, signature) {
+  var secret = getConfig('LINE_CHANNEL_SECRET');
+  var hmac = Utilities.computeHmacSha256Signature(body, secret);
+  var expectedSig = Utilities.base64Encode(hmac);
+  return expectedSig === signature;
+}
+
+/**
  * 從 LINE Content API 下載檔案
  * @param {string} messageId - LINE 訊息 ID
  * @returns {Blob} 檔案 Blob

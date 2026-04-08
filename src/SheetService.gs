@@ -3,12 +3,22 @@
  */
 
 /**
+ * 取得試算表物件（若未傳入則自行開啟）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Spreadsheet}
+ */
+function getSpreadsheet(ss) {
+  return ss || SpreadsheetApp.openById(getConfig('SHEET_ID'));
+}
+
+/**
  * 從指定工作表讀取分類清單
  * @param {string} sheetName - 工作表名稱（'支出分類' 或 '收入分類'）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {string[]} 分類名稱陣列
  */
-function getCategories(sheetName) {
-  var ss = SpreadsheetApp.openById(getConfig('SHEET_ID'));
+function getCategories(sheetName, ss) {
+  ss = getSpreadsheet(ss);
   var sheet = ss.getSheetByName(sheetName);
   var lastRow = sheet.getLastRow();
 
@@ -34,23 +44,26 @@ function getCategories(sheetName) {
  * @param {string} currency - 幣別
  * @param {number} amount - 金額
  * @param {string} originalMessage - 原始訊息
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
  */
-function appendTransaction(date, institution, account, type, category, item, description, currency, amount, originalMessage) {
-  var ss = SpreadsheetApp.openById(getConfig('SHEET_ID'));
+function appendTransaction(date, institution, account, type, category, item, description, currency, amount, originalMessage, ss) {
+  ss = getSpreadsheet(ss);
   var sheet = ss.getSheetByName('交易紀錄');
   sheet.appendRow([date, institution, account, type, category, item, description, currency, amount, originalMessage]);
 }
 
 /**
- * 批次寫入多筆交易紀錄（PDF 匯入用）
+ * 批次寫入多筆交易紀錄
  * @param {Object[]} transactions - 交易陣列
+ * @param {string} [source] - 來源標記（'PDF匯入' 或 '文字匯入'）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
  */
-function appendTransactionsBatch(transactions) {
+function appendTransactionsBatch(transactions, source, ss) {
   if (transactions.length === 0) {
     return;
   }
 
-  var ss = SpreadsheetApp.openById(getConfig('SHEET_ID'));
+  ss = getSpreadsheet(ss);
   var sheet = ss.getSheetByName('交易紀錄');
   var lastRow = sheet.getLastRow();
 
@@ -65,7 +78,7 @@ function appendTransactionsBatch(transactions) {
       tx.description || '',
       tx.currency || 'TWD',
       tx.amount,
-      'PDF匯入'
+      source || 'PDF匯入'
     ];
   });
 

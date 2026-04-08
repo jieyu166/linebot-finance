@@ -16,7 +16,23 @@ function doGet(e) {
  */
 function doPost(e) {
   try {
-    var json = JSON.parse(e.postData.contents);
+    var body = e.postData.contents;
+
+    // LINE 簽章驗證
+    var headers = e.postData.headers || {};
+    var signature = headers['x-line-signature'] || headers['X-Line-Signature'];
+    if (signature) {
+      if (!verifyLineSignature(body, signature)) {
+        Logger.log('Invalid LINE signature');
+        return ContentService.createTextOutput(
+          JSON.stringify({ status: 'ok' })
+        ).setMimeType(ContentService.MimeType.JSON);
+      }
+    } else {
+      Logger.log('Cannot verify LINE signature: headers not available');
+    }
+
+    var json = JSON.parse(body);
     var events = json.events;
 
     for (var i = 0; i < events.length; i++) {
@@ -49,13 +65,16 @@ function handleTextMessage(event) {
   var replyToken = event.replyToken;
 
   try {
+    // 開啟試算表（整個流程共用一次）
+    var ss = SpreadsheetApp.openById(getConfig('SHEET_ID'));
+
     // 讀取分類清單
-    var expenseCategories = getCategories('支出分類');
-    var incomeCategories = getCategories('收入分類');
+    var expenseCategories = getCategories('支出分類', ss);
+    var incomeCategories = getCategories('收入分類', ss);
 
     // 偵測是否為銀行帳單文字（多行、含帳單關鍵字）
     if (isBankStatement(userMessage)) {
-      handleBankStatementText(replyToken, userMessage, expenseCategories, incomeCategories);
+      handleBankStatementText(replyToken, userMessage, expenseCategories, incomeCategories, ss);
       return;
     }
 
@@ -81,7 +100,8 @@ function handleTextMessage(event) {
       parsed.description || userMessage,
       parsed.currency || 'TWD',
       parsed.amount,
-      userMessage
+      userMessage,
+      ss
     );
 
     // 回覆確認訊息
@@ -152,9 +172,10 @@ function handleFileMessage(event) {
       return;
     }
 
-    // 讀取分類清單
-    var expenseCategories = getCategories('支出分類');
-    var incomeCategories = getCategories('收入分類');
+    // 開啟試算表並讀取分類清單
+    var ss = SpreadsheetApp.openById(getConfig('SHEET_ID'));
+    var expenseCategories = getCategories('支出分類', ss);
+    var incomeCategories = getCategories('收入分類', ss);
 
     // 呼叫 OpenAI 批次解析
     var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories);
@@ -165,42 +186,9 @@ function handleFileMessage(event) {
     }
 
     // 批次寫入試算表
-    appendTransactionsBatch(result.transactions);
+    appendTransactionsBatch(result.transactions, 'PDF匯入', ss);
 
-    // 統計摘要
-    var expenseCount = 0;
-    var expenseTotal = 0;
-    var incomeCount = 0;
-    var incomeTotal = 0;
-
-    for (var i = 0; i < result.transactions.length; i++) {
-      var tx = result.transactions[i];
-      if (tx.type === '支出') {
-        expenseCount++;
-        expenseTotal += tx.amount;
-      } else {
-        incomeCount++;
-        incomeTotal += tx.amount;
-      }
-    }
-
-    // 組合回覆訊息
-    var replyText = '📄 帳單匯入完成！\n';
-    if (result.bank) {
-      replyText += '銀行：' + result.bank + '\n';
-    }
-    replyText += '共匯入 ' + result.transactions.length + ' 筆交易\n';
-    if (expenseCount > 0) {
-      replyText += '  支出：' + expenseCount + ' 筆，合計 ' + expenseTotal.toLocaleString() + ' 元\n';
-    }
-    if (incomeCount > 0) {
-      replyText += '  回饋：' + incomeCount + ' 筆，合計 ' + incomeTotal.toLocaleString() + ' 元\n';
-    }
-    if (result.skipped && result.skipped > 0) {
-      replyText += '  （跳過 ' + result.skipped + ' 筆無法辨識的項目）';
-    }
-
-    replyToLine(replyToken, replyText.trim());
+    replyToLine(replyToken, buildImportSummary(result, 'PDF'));
 
   } catch (error) {
     Logger.log('handleFileMessage error: ' + error.message);
@@ -222,7 +210,7 @@ function isBankStatement(text) {
   var keywords = [
     '交易日期', '交易明細', '帳單', '帳戶', '帳號',
     '餘額', '明細', '入帳', '消費日', '摘要',
-    '支出', '存入', '轉入', '轉出', '提出',
+    '轉入', '轉出', '提出',
     '成交日', '對帳單', '結帳日', '應繳'
   ];
 
@@ -233,8 +221,8 @@ function isBankStatement(text) {
     }
   }
 
-  // 至少命中 2 個關鍵字且文字長度超過 100 才當帳單
-  return matchCount >= 2 && text.length > 100;
+  // 至少命中 3 個關鍵字且文字長度超過 100 才當帳單
+  return matchCount >= 3 && text.length > 100;
 }
 
 /**
@@ -244,7 +232,7 @@ function isBankStatement(text) {
  * @param {string[]} expenseCategories
  * @param {string[]} incomeCategories
  */
-function handleBankStatementText(replyToken, text, expenseCategories, incomeCategories) {
+function handleBankStatementText(replyToken, text, expenseCategories, incomeCategories, ss) {
   // 呼叫批次解析（共用 PDF 的 prompt）
   var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories);
 
@@ -254,9 +242,18 @@ function handleBankStatementText(replyToken, text, expenseCategories, incomeCate
   }
 
   // 批次寫入試算表
-  appendTransactionsBatch(result.transactions);
+  appendTransactionsBatch(result.transactions, '文字匯入', ss);
 
-  // 統計摘要
+  replyToLine(replyToken, buildImportSummary(result, '文字'));
+}
+
+/**
+ * 建構匯入摘要回覆訊息（共用）
+ * @param {Object} result - parsePdfWithOpenAI 結果
+ * @param {string} source - 來源（'PDF' 或 '文字'）
+ * @returns {string} 格式化的回覆訊息
+ */
+function buildImportSummary(result, source) {
   var expenseCount = 0;
   var expenseTotal = 0;
   var incomeCount = 0;
@@ -273,8 +270,8 @@ function handleBankStatementText(replyToken, text, expenseCategories, incomeCate
     }
   }
 
-  // 組合回覆訊息
-  var replyText = '📄 帳單文字匯入完成！\n';
+  var label = source === 'PDF' ? '帳單匯入完成！' : '帳單文字匯入完成！';
+  var replyText = '📄 ' + label + '\n';
   if (result.bank) {
     replyText += '銀行：' + result.bank + '\n';
   }
@@ -289,5 +286,5 @@ function handleBankStatementText(replyToken, text, expenseCategories, incomeCate
     replyText += '  （跳過 ' + result.skipped + ' 筆無法辨識的項目）';
   }
 
-  replyToLine(replyToken, replyText.trim());
+  return replyText.trim();
 }
