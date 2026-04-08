@@ -1,0 +1,9 @@
+.spectra/
+openspec/.vector-search.db*
+.claude/
+.cursor/
+.continue/
+.agents/
+.cursorrules
+.env
+*.log
