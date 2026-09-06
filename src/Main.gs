@@ -124,7 +124,7 @@ function handleTextMessage(event) {
 
     // 繳信用卡／轉帳：嘗試自動配對對方帳戶（配對失敗不影響已寫入的記帳，仍回報成功）
     if (parsed.category === '繳信用卡' || parsed.category === '轉帳') {
-      var pairing = tryAutoPair(written, ss);
+      var pairing = tryAutoPair([written], ss);
       if (pairing.paired > 0) {
         replyText += '\n已自動配對對方帳戶';
       }
@@ -140,13 +140,14 @@ function handleTextMessage(event) {
 
 /**
  * 嘗試自動配對對方帳戶，失敗時記錄錯誤並回傳空結果，不中斷呼叫端流程
- * @param {Object[]} written - 已寫入的交易紀錄陣列
+ * @param {Object|Object[]} written - 已寫入的交易紀錄，陣列或單一物件皆可（單一物件會自動包成陣列）
  * @param {Spreadsheet} ss
  * @returns {{paired:number, created:number, details:Array}}
  */
 function tryAutoPair(written, ss) {
   try {
-    return autoPairImportedTransactions(written, ss);
+    var newTxs = (Object.prototype.toString.call(written) === '[object Array]') ? written : [written];
+    return autoPairImportedTransactions(newTxs, ss);
   } catch (e) {
     Logger.log('auto-pair error: ' + e.message);
     return { paired: 0, created: 0, details: [] };

@@ -192,6 +192,48 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     assert.strictEqual(cardIncome[11], cardBill[11]);
     assert.ok(cardBill[11], 'transferId should be set');
   });
+
+  // ---- handleTextMessage 呼叫形狀：tryAutoPair 對單一物件與陣列都要能配對成功 ----
+
+  function singleTxFixture() {
+    const acctSheet2 = fakeSheet([
+      acctRow('永豐大戶', '永豐銀行', '', '', '198-01'),
+      acctRow('永豐信用卡', '永豐銀行', '信用卡', '永豐大戶', '')
+    ]);
+    const txSheet2 = fakeSheet([]);
+    const ss2 = fakeSs({ '交易紀錄': txSheet2, '帳戶管理': acctSheet2 });
+    const written = gs2.appendTransaction(
+      '2026/08/03', '永豐銀行', '永豐大戶', '支出', '繳信用卡', '永豐卡費',
+      '永豐卡費 4637898810887000', 'TWD', 14684, '永豐卡費14684', ss2
+    );
+    return { ss2, txSheet2, written };
+  }
+
+  t('tryAutoPair：單筆交易（陣列形狀 [written]，即 handleTextMessage 實際呼叫方式）可自動配對成功', () => {
+    const { ss2, txSheet2, written } = singleTxFixture();
+    const pairing = gs2.tryAutoPair([written], ss2);
+    assert.strictEqual(pairing.paired, 1);
+    assert.strictEqual(pairing.created, 1);
+
+    const rows = txSheet2.getRange(2, 1, txSheet2.getLastRow() - 1, 12).getValues();
+    const cardIncome = rows.filter(r => r[2] === '永豐信用卡' && r[3] === '收入')[0];
+    const cardBill = rows.filter(r => r[2] === '永豐大戶' && r[4] === '繳信用卡')[0];
+    assert.ok(cardIncome, 'expected 永豐信用卡 收入 row');
+    assert.ok(cardBill, 'expected 繳信用卡 row');
+    assert.strictEqual(cardIncome[11], cardBill[11]);
+    assert.ok(cardBill[11], 'transferId should be set');
+  });
+
+  t('tryAutoPair：非陣列（單一 written 物件）會被正規化成 [written]，同樣配對成功（防止 fix round 1 錯誤重現）', () => {
+    const { ss2, txSheet2, written } = singleTxFixture();
+    const pairing = gs2.tryAutoPair(written, ss2);
+    assert.strictEqual(pairing.paired, 1);
+    assert.strictEqual(pairing.created, 1);
+
+    const rows = txSheet2.getRange(2, 1, txSheet2.getLastRow() - 1, 12).getValues();
+    const cardIncome = rows.filter(r => r[2] === '永豐信用卡' && r[3] === '收入')[0];
+    assert.ok(cardIncome, 'expected 永豐信用卡 收入 row');
+  });
 }
 
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
