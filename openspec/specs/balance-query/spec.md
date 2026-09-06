@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'account-balance-tracking'. Update Purpose after archive.
+LINE 文字指令查詢帳戶餘額：全部帳戶一覽、單一帳戶明細、帳戶清單。
 
 ## Requirements
 

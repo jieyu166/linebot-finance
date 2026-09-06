@@ -1,0 +1,8 @@
+{
+  "name": "linebot-finance",
+  "private": true,
+  "description": "LINE Bot + Google Apps Script + OpenAI 個人記帳系統（test 目錄為本機 Node 測試）",
+  "scripts": {
+    "test": "node test/balance.test.js"
+  }
+}

@@ -57,9 +57,9 @@ function parseSheetDate(value) {
     return null;
   }
   if (Object.prototype.toString.call(value) === '[object Date]') {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    value = Utilities.formatDate(value, 'Asia/Taipei', 'yyyy/MM/dd');
   }
-  var parts = String(value).trim().split(/[\/\-]/);
+  var parts = String(value).trim().split(/[\/\-\.]/);
   if (parts.length !== 3) {
     return null;
   }
@@ -70,6 +70,35 @@ function parseSheetDate(value) {
     return null;
   }
   return new Date(year, month - 1, day);
+}
+
+/**
+ * 將儲存格金額轉為數字：容許 "1,234"、"$1,234"、"NT$ 1,234" 等字串
+ * @param {*} value - 試算表儲存格值
+ * @returns {number} 無法解析時回傳 0
+ */
+function parseAmount(value) {
+  if (value === '' || value === null || value === undefined) {
+    return 0;
+  }
+  if (typeof value === 'number') {
+    return isNaN(value) ? 0 : value;
+  }
+  var cleaned = String(value).replace(/[^0-9.\-]/g, '');
+  var num = Number(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
+/**
+ * 名稱正規化：去空白、全形轉半形、小寫，供帳戶名稱比對
+ * @param {*} value
+ * @returns {string}
+ */
+function normalizeName(value) {
+  return String(value || '')
+    .replace(/[\s　]/g, '')
+    .replace(/[！-～]/g, function(ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); })
+    .toLowerCase();
 }
 
 /**
@@ -90,14 +119,14 @@ function getAccounts(ss) {
   }
 
   var values = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
-  return values
+  var accounts = values
     .map(function(row) {
       var activeValue = row[6];
       return {
         name: String(row[0] || '').trim(),
         institution: String(row[1] || '').trim(),
         currency: String(row[2] || 'TWD').trim() || 'TWD',
-        initialBalance: row[3] === '' || row[3] === null ? 0 : Number(row[3]) || 0,
+        initialBalance: parseAmount(row[3]),
         initialDate: normalizeDateString(row[4]),
         note: String(row[5] || '').trim(),
         active: activeValue === true || String(activeValue).toUpperCase() === 'TRUE'
@@ -106,6 +135,80 @@ function getAccounts(ss) {
     .filter(function(account) {
       return account.name !== '' && account.active === true;
     });
+
+  // 同機構＋同幣別只有一個帳戶時，交易列可用機構名稱回推帳戶（舊資料相容）
+  accounts.forEach(function(account) {
+    var key = normalizeName(account.institution) + '|' + account.currency;
+    var sameCount = accounts.filter(function(other) {
+      return normalizeName(other.institution) + '|' + other.currency === key;
+    }).length;
+    account.institutionUnique = sameCount === 1;
+  });
+  return accounts;
+}
+
+/**
+ * 判斷交易列屬於哪種帳戶對應方式，不符合時回傳 null
+ * 對應優先序：
+ *   1. C 欄帳戶名稱 = 帳戶名稱（正規化後比對，容許空白/大小寫差異）
+ *   2. C 欄帳戶名稱 = 金融機構名稱（AI 未照清單填時），且該機構＋幣別只對應一個帳戶
+ *   3. C 欄空白、B 欄金融機構 = 帳戶機構，且該機構＋幣別只對應一個帳戶（舊資料）
+ *   4. 現金：C 欄空白且 B 欄空白或「現金」
+ * @param {Object} account - 帳戶設定
+ * @param {Array} row - 交易紀錄列資料 A-I
+ * @returns {string|null} 對應方式代碼
+ */
+function matchAccountRow(account, row) {
+  var rowAccount = normalizeName(row[2]);
+  var rowInstitution = normalizeName(row[1]);
+  var name = normalizeName(account.name);
+  var institution = normalizeName(account.institution);
+  var institutionUnique = account.institutionUnique !== false;
+
+  if (rowAccount !== '' && rowAccount === name) {
+    return 'name';
+  }
+  if (rowAccount !== '' && institution !== '' && rowAccount === institution && institutionUnique) {
+    return 'account-as-institution';
+  }
+  if (rowAccount === '') {
+    if (name === normalizeName('現金') && (rowInstitution === '' || rowInstitution === normalizeName('現金'))) {
+      return 'cash-blank';
+    }
+    if (institution !== '' && rowInstitution === institution && institutionUnique) {
+      return 'institution';
+    }
+  }
+  return null;
+}
+
+/**
+ * 判斷交易不納入餘額的原因，納入時回傳 null
+ * @param {Object} account - 帳戶設定
+ * @param {Array} row - 交易紀錄列資料 A-I
+ * @returns {string|null} 排除原因代碼
+ */
+function excludeReason(account, row) {
+  var rowCategory = String(row[4] || '').trim();
+  var rowCurrency = String(row[7] || 'TWD').trim().toUpperCase() || 'TWD';
+  if (rowCategory === '繳信用卡') {
+    return 'credit-card-payment';
+  }
+  if (rowCurrency !== String(account.currency || 'TWD').toUpperCase()) {
+    return 'currency';
+  }
+  if (!matchAccountRow(account, row)) {
+    return 'account';
+  }
+  if (!account.initialDate) {
+    return null;
+  }
+  var txDate = parseSheetDate(row[0]);
+  var initialDate = parseSheetDate(account.initialDate);
+  if (!txDate || !initialDate) {
+    return 'bad-date';
+  }
+  return txDate.getTime() > initialDate.getTime() ? null : 'before-initial-date';
 }
 
 /**
@@ -115,30 +218,7 @@ function getAccounts(ss) {
  * @returns {boolean}
  */
 function shouldIncludeTransaction(account, row) {
-  var rowAccount = String(row[2] || '').trim();
-  var rowInstitution = String(row[1] || '').trim();
-  var rowCategory = String(row[4] || '').trim();
-  var rowCurrency = String(row[7] || 'TWD').trim() || 'TWD';
-  if (rowCategory === '繳信用卡') {
-    return false;
-  }
-  if (account.name === '現金' && rowAccount === '' && (rowInstitution === '' || rowInstitution === '現金')) {
-    rowAccount = '現金';
-  }
-  if (rowAccount !== account.name || rowCurrency !== account.currency) {
-    return false;
-  }
-
-  if (!account.initialDate) {
-    return true;
-  }
-
-  var txDate = parseSheetDate(row[0]);
-  var initialDate = parseSheetDate(account.initialDate);
-  if (!txDate || !initialDate) {
-    return false;
-  }
-  return txDate.getTime() > initialDate.getTime();
+  return excludeReason(account, row) === null;
 }
 
 /**
@@ -158,7 +238,7 @@ function calculateBalanceFromRows(account, transactionRows) {
     }
 
     var type = String(row[3] || '').trim();
-    var amount = Number(row[8]) || 0;
+    var amount = Math.abs(parseAmount(row[8]));
     if (type === '支出') {
       transactionTotal -= amount;
       txCount++;
@@ -232,6 +312,43 @@ function getAllAccountBalances(ss) {
   return accounts.map(function(account) {
     return calculateBalanceFromRows(account, transactionRows);
   });
+}
+
+/**
+ * 除錯用：在 GAS 編輯器手動執行，Logger 會列出指定帳戶每種排除原因的筆數與範例列
+ * @param {string} accountName - 帳戶名稱，未填則用「現金」
+ */
+function debugAccountBalance(accountName) {
+  accountName = accountName || '現金';
+  var ss = getSpreadsheet();
+  var accounts = getAccounts(ss);
+  var account = null;
+  for (var i = 0; i < accounts.length; i++) {
+    if (accounts[i].name === accountName) {
+      account = accounts[i];
+    }
+  }
+  if (!account) {
+    Logger.log('找不到啟用帳戶：' + accountName + '；可用：' + accounts.map(function(a) { return a.name; }).join('、'));
+    return;
+  }
+  Logger.log('帳戶設定：' + JSON.stringify(account));
+
+  var rows = getTransactionRows(ss);
+  var stats = {};
+  var samples = {};
+  for (var r = 0; r < rows.length; r++) {
+    var reason = excludeReason(account, rows[r]) || 'included';
+    stats[reason] = (stats[reason] || 0) + 1;
+    if (!samples[reason]) {
+      samples[reason] = '第 ' + (r + 2) + ' 列 ' + JSON.stringify(rows[r].slice(0, 9));
+    }
+  }
+  Logger.log('交易紀錄共 ' + rows.length + ' 列，分類統計：' + JSON.stringify(stats));
+  Object.keys(samples).forEach(function(key) {
+    Logger.log('[' + key + '] 範例：' + samples[key]);
+  });
+  Logger.log('計算結果：' + JSON.stringify(calculateBalanceFromRows(account, rows)));
 }
 
 /**

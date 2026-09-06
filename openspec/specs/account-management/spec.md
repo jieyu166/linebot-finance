@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'account-balance-tracking'. Update Purpose after archive.
+維護「帳戶管理」主檔（帳戶名稱、機構、幣別、初始餘額、初始日期），並依交易紀錄即時計算各帳戶餘額。帳戶名稱是交易紀錄 C 欄的比對鍵。
 
 ## Requirements
 
@@ -59,7 +59,15 @@ The system SHALL provide a `getAccounts(ss)` function that reads all rows from t
 The system SHALL provide a `calculateAccountBalance(accountName, ss)` function that computes the current balance for a named account. The function SHALL:
 1. Call `getAccounts()` to find the account configuration (name, initialBalance, initialDate, currency).
 2. Read all rows from the "交易紀錄" worksheet (columns A–I: 日期, 金融機構, 帳戶名稱, 類型, 幣別 at column H, 金額 at column I).
-3. Include only rows where column C (帳戶名稱) exactly matches the account name AND column H (幣別) matches the account currency AND the transaction date is strictly after the account's initialDate (i.e., transaction date > initialDate; the initialDate itself is excluded). For backward compatibility, rows with blank column C and column B blank or "現金" SHALL be treated as account "現金".
+3. Include only rows that match the account (see matching rules below) AND column H (幣別) matches the account currency (case-insensitive) AND the transaction date is strictly after the account's initialDate (i.e., transaction date > initialDate; the initialDate itself is excluded). Date cells that are Date objects SHALL be interpreted in Asia/Taipei regardless of the script timezone.
+
+   Account matching rules, applied in order after normalizing names (strip whitespace, full-width to half-width, lowercase):
+   - a. Column C equals the account name.
+   - b. Column C equals the account's 金融機構, and that institution + currency maps to exactly one active account.
+   - c. Column C is blank and column B equals the account's 金融機構, and that institution + currency maps to exactly one active account (legacy rows).
+   - d. Column C is blank and column B is blank or "現金" → treated as account "現金".
+   
+   Amount cells (column I and 初始餘額) MAY be numbers or strings containing thousands separators or currency symbols; the system SHALL parse them and use the absolute value for transaction amounts.
 4. Subtract the amount for 支出 transactions and add the amount for 收入 transactions.
 5. Exclude rows whose category is "繳信用卡" from balance calculations, because credit card statement expenses may already be imported separately and counting the bank debit would double-count the same spending.
 6. Return an object with: name, currency, initialBalance, transactionTotal, currentBalance (initialBalance + transactionTotal), txCount, and initialDate.
@@ -88,6 +96,21 @@ The `getAllAccountBalances(ss)` function SHALL compute balances for all active a
 
 - **WHEN** an account has an empty initialDate
 - **THEN** all transactions matching the account name and currency are included in the balance calculation
+
+#### Scenario: Legacy row with blank account column matched by institution
+
+- **WHEN** a transaction row has 金融機構 "永豐銀行", blank 帳戶名稱, 幣別 "TWD", and only one active TWD account has institution 永豐銀行
+- **THEN** `calculateAccountBalance("永豐大戶")` includes that row
+
+#### Scenario: Account column holds institution name
+
+- **WHEN** a transaction row has 帳戶名稱 "LINE Bank" and account "LineBank" has institution "LINE Bank"
+- **THEN** the row is matched to account "LineBank"
+
+#### Scenario: Amount stored as formatted string
+
+- **WHEN** a 支出 row has 金額 "1,234" (string)
+- **THEN** the balance decreases by 1234
 
 #### Scenario: Blank cash account rows count as cash
 
