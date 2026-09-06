@@ -19,7 +19,27 @@ const Logger = { log: function(m) { console.log('[Logger]', m); } };
 // 用 vm.runInThisContext（而非 vm.createContext）執行 .gs 檔，讓程式碼與測試檔共用同一份
 // Array/Object 等內建原型 —— 避免 createContext 產生的獨立 realm 造成
 // assert.deepStrictEqual 對陣列/物件比對時「結構相同但非同一 realm」而判定失敗。
+//
+// 注意：.gs 內的函式彼此、以及對 Utilities/Logger 等的參照都是在呼叫當下
+// 透過 global 解析的自由變數（非閉包捕捉），所以這些注入物件與載入的函式
+// 必須留在 global 上才能運作。多數測試檔各自獨立 process（見 run-all.js），
+// 不會互相汙染；但同一個測試檔若呼叫 loadGs 兩次（例如用不同的檔案清單），
+// 前一次留下的 global 就會汙染後一次 —— 所以這裡記錄上一次呼叫加到 global 上的
+// 所有 key，下一次呼叫開頭先清掉，再重新載入。
+let previousKeys = [];
+
+// .gs 檔頂層的 `var x = ...` 經 vm.runInThisContext 執行後，會變成 global 上
+// 「不可設定（non-configurable）」的屬性（跟直接 script 裡宣告 var 一樣），
+// delete global.x 會靜默失敗、屬性還在。所以刪不掉就退而求其次設成 undefined，
+// 讓 typeof x === 'undefined' 成立，效果等同重置。
+function clearGlobal(k) {
+  if (delete global[k]) { return; }
+  global[k] = undefined;
+}
+
 function loadGs(files, extraGlobals) {
+  previousKeys.forEach(clearGlobal);
+
   let uuidCounter = 0;
   const utilities = Object.assign({}, Utilities, {
     getUuid: function() { uuidCounter++; return 'uuid-' + String(uuidCounter).padStart(4, '0'); }
@@ -27,10 +47,6 @@ function loadGs(files, extraGlobals) {
   const LockService = { getScriptLock: () => ({ waitLock() {}, releaseLock() {}, tryLock() { return true; } }) };
   const injected = Object.assign({ Utilities: utilities, Logger, LockService, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
 
-  // 注意：.gs 內的函式彼此、以及對 Utilities/Logger 等的參照都是在呼叫當下
-  // 透過 global 解析的自由變數（非閉包捕捉），所以這裡刻意「不」在回傳前清除
-  // global 上的注入物件與載入的函式 —— 每個測試檔各自獨立 process（見 run-all.js），
-  // 留在 global 上不會互相汙染。
   const injectedKeys = Object.keys(injected);
   injectedKeys.forEach(function(k) { global[k] = injected[k]; });
 
@@ -46,6 +62,8 @@ function loadGs(files, extraGlobals) {
     if (!beforeKeys.has(k)) { result[k] = global[k]; }
   });
   injectedKeys.forEach(function(k) { result[k] = injected[k]; });
+
+  previousKeys = Object.keys(result);
 
   return result;
 }
