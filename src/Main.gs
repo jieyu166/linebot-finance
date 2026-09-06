@@ -68,18 +68,26 @@ function handleTextMessage(event) {
     // 開啟試算表（整個流程共用一次）
     var ss = SpreadsheetApp.openById(getConfig('SHEET_ID'));
 
+    var balanceCommand = detectBalanceCommand(userMessage);
+    if (balanceCommand.isCommand) {
+      handleBalanceCommand(replyToken, balanceCommand.accountName, ss);
+      return;
+    }
+
     // 讀取分類清單
     var expenseCategories = getCategories('支出分類', ss);
     var incomeCategories = getCategories('收入分類', ss);
+    var accounts = getAccounts(ss);
+    var accountNames = accounts.map(function(account) { return account.name; });
 
     // 偵測是否為銀行帳單文字（多行、含帳單關鍵字）
     if (isBankStatement(userMessage)) {
-      handleBankStatementText(replyToken, userMessage, expenseCategories, incomeCategories, ss);
+      handleBankStatementText(replyToken, userMessage, expenseCategories, incomeCategories, accountNames, ss);
       return;
     }
 
     // 一般文字記帳流程
-    var parsed = parseWithOpenAI(userMessage, expenseCategories, incomeCategories);
+    var parsed = parseWithOpenAI(userMessage, expenseCategories, incomeCategories, accountNames);
 
     // 驗證解析結果
     if (!parsed || !parsed.amount || parsed.amount <= 0 || !parsed.category || !parsed.type) {
@@ -176,9 +184,11 @@ function handleFileMessage(event) {
     var ss = SpreadsheetApp.openById(getConfig('SHEET_ID'));
     var expenseCategories = getCategories('支出分類', ss);
     var incomeCategories = getCategories('收入分類', ss);
+    var accounts = getAccounts(ss);
+    var accountNames = accounts.map(function(account) { return account.name; });
 
     // 呼叫 OpenAI 批次解析
-    var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories);
+    var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accountNames);
 
     if (!result.transactions || result.transactions.length === 0) {
       replyToLine(replyToken, '無法從此 PDF 中解析出交易紀錄，請確認是否為銀行帳單。');
@@ -226,15 +236,134 @@ function isBankStatement(text) {
 }
 
 /**
+ * 偵測是否為餘額查詢指令
+ * @param {string} text - 使用者輸入文字
+ * @returns {{isCommand:boolean, accountName:string|null}}
+ */
+function detectBalanceCommand(text) {
+  text = String(text || '').trim();
+  var allCommands = ['餘額', '查餘額', '所有餘額', '帳戶餘額'];
+  if (allCommands.indexOf(text) >= 0) {
+    return { isCommand: true, accountName: null };
+  }
+
+  var listCommands = ['帳戶清單', '帳戶列表'];
+  if (listCommands.indexOf(text) >= 0) {
+    return { isCommand: true, accountName: '__LIST__' };
+  }
+
+  if (text.length > 2 && text.slice(-2) === '餘額') {
+    var suffixAccount = text.slice(0, -2).trim();
+    if (suffixAccount !== '') {
+      return { isCommand: true, accountName: suffixAccount };
+    }
+  }
+
+  if (text.indexOf('餘額 ') === 0) {
+    var prefixAccount = text.slice(3).trim();
+    if (prefixAccount !== '') {
+      return { isCommand: true, accountName: prefixAccount };
+    }
+  }
+
+  return { isCommand: false, accountName: null };
+}
+
+/**
+ * 格式化金額
+ * @param {number} amount - 金額
+ * @returns {string}
+ */
+function formatAmount(amount) {
+  amount = Number(amount) || 0;
+  var sign = amount < 0 ? '-' : '';
+  return sign + '$' + Math.abs(amount).toLocaleString();
+}
+
+/**
+ * 格式化餘額金額，可附加非 TWD 幣別
+ * @param {number} amount - 金額
+ * @param {string} currency - 幣別
+ * @returns {string}
+ */
+function formatBalanceAmount(amount, currency) {
+  var formatted = formatAmount(amount);
+  if (currency && currency !== 'TWD') {
+    formatted += ' ' + currency;
+  }
+  return formatted;
+}
+
+/**
+ * 處理餘額查詢指令
+ * @param {string} replyToken
+ * @param {string|null} accountName
+ * @param {Spreadsheet} ss
+ */
+function handleBalanceCommand(replyToken, accountName, ss) {
+  if (accountName === null) {
+    var balances = getAllAccountBalances(ss);
+    if (balances.length === 0) {
+      replyToLine(replyToken, '尚未設定任何帳戶，請先在試算表「帳戶管理」工作表填入資料。');
+      return;
+    }
+
+    var today = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy/MM/dd');
+    var allReply = '💰 帳戶餘額一覽（' + today + '）';
+    for (var i = 0; i < balances.length; i++) {
+      allReply += '\n' + balances[i].name + '：' + formatBalanceAmount(balances[i].currentBalance, balances[i].currency);
+    }
+    allReply += '\n共 ' + balances.length + ' 個帳戶';
+    replyToLine(replyToken, allReply);
+    return;
+  }
+
+  var accounts = getAccounts(ss);
+  if (accountName === '__LIST__') {
+    var listReply = '📋 帳戶清單（共 ' + accounts.length + ' 個）';
+    for (var j = 0; j < accounts.length; j++) {
+      listReply += '\n' + accounts[j].name + '（' + accounts[j].currency + '）';
+    }
+    replyToLine(replyToken, listReply);
+    return;
+  }
+
+  var balance = calculateAccountBalance(accountName, ss);
+  if (!balance) {
+    var names = accounts.map(function(account) { return account.name; });
+    replyToLine(replyToken, '找不到帳戶「' + accountName + '」。\n可用帳戶：' + names.join('、'));
+    return;
+  }
+
+  var adjustment = formatAmount(balance.transactionTotal);
+  if (balance.transactionTotal > 0) {
+    adjustment = '+' + adjustment;
+  }
+
+  var initialLine = '初始餘額：' + formatBalanceAmount(balance.initialBalance, balance.currency);
+  if (balance.initialDate) {
+    initialLine += '（' + balance.initialDate + ' 起算）';
+  }
+
+  var replyText = '💰 ' + balance.name + ' 餘額\n\n'
+    + '幣別：' + balance.currency + '\n'
+    + initialLine + '\n'
+    + '交易調整：' + adjustment + '（共 ' + balance.txCount + ' 筆）\n'
+    + '當前餘額：' + formatBalanceAmount(balance.currentBalance, balance.currency);
+  replyToLine(replyToken, replyText);
+}
+
+/**
  * 處理貼上的銀行帳單文字（走批次解析流程）
  * @param {string} replyToken
  * @param {string} text - 帳單文字
  * @param {string[]} expenseCategories
  * @param {string[]} incomeCategories
+ * @param {string[]} accountNames
  */
-function handleBankStatementText(replyToken, text, expenseCategories, incomeCategories, ss) {
+function handleBankStatementText(replyToken, text, expenseCategories, incomeCategories, accountNames, ss) {
   // 呼叫批次解析（共用 PDF 的 prompt）
-  var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories);
+  var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accountNames);
 
   if (!result.transactions || result.transactions.length === 0) {
     replyToLine(replyToken, '無法從文字中解析出交易紀錄。\n請確認是否為銀行帳單明細，或嘗試傳送 PDF 檔案。');

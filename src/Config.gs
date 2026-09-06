@@ -50,7 +50,8 @@ function initializeSheets() {
       ['飲食'], ['服飾'], ['家庭'], ['交通'], ['學習'],
       ['休閒'], ['購物'], ['醫療'], ['其他'], ['保險'],
       ['手續費'], ['稅金'], ['工作'], ['父母'], ['老婆'],
-      ['買房'], ['紅包'], ['投資'], ['轉帳'], ['貸款']
+      ['買房'], ['紅包'], ['投資'], ['轉帳'], ['貸款'],
+      ['繳信用卡']
     ];
     expSheet.getRange(2, 1, expCategories.length, 1).setValues(expCategories);
     expSheet.setFrozenRows(1);
@@ -67,6 +68,30 @@ function initializeSheets() {
     ];
     incSheet.getRange(2, 1, incCategories.length, 1).setValues(incCategories);
     incSheet.setFrozenRows(1);
+  }
+
+  // 建立「帳戶管理」工作表（已存在時不覆蓋使用者填入的初始餘額）
+  var accountSheet = ss.getSheetByName('帳戶管理');
+  if (!accountSheet) {
+    accountSheet = ss.insertSheet('帳戶管理');
+    accountSheet.getRange('A1:G1').setValues([['帳戶名稱', '金融機構', '幣別', '初始餘額', '初始日期', '備註', '是否啟用']]);
+    var defaultAccounts = [
+      ['現金', '現金', 'TWD', '', '', '', true],
+      ['一銀', '第一銀行', 'TWD', '', '', '', true],
+      ['LineBank', 'LINE Bank', 'TWD', '', '', '', true],
+      ['王道', '王道銀行', 'TWD', '', '', '', true],
+      ['永豐大戶', '永豐銀行', 'TWD', '', '', '', true],
+      ['永豐證券', '永豐證券', 'TWD', '', '', '', true],
+      ['永豐外幣', '永豐銀行', 'USD', '', '', '', true],
+      ['玉山', '玉山銀行', 'TWD', '', '', '', true],
+      ['台新', '台新銀行', 'TWD', '', '', '', true],
+      ['中信', '中國信託', 'TWD', '', '', '', true],
+      ['富邦', '富邦銀行', 'TWD', '', '', '', true],
+      ['國泰', '國泰銀行', 'TWD', '', '', '', true],
+      ['樂天', '樂天銀行', 'TWD', '', '', '', true]
+    ];
+    accountSheet.getRange(2, 1, defaultAccounts.length, 7).setValues(defaultAccounts);
+    accountSheet.setFrozenRows(1);
   }
 
   Logger.log('試算表結構已初始化');

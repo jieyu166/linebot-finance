@@ -13,7 +13,7 @@ The system SHALL store expense categories in a "支出分類" worksheet and inco
 #### Scenario: Initialize expense categories
 
 - **WHEN** the initializeSheets function runs and no "支出分類" worksheet exists
-- **THEN** the system creates the worksheet with header "分類名稱" and populates 20 default expense categories: 飲食, 服飾, 家庭, 交通, 學習, 休閒, 購物, 醫療, 其他, 保險, 手續費, 稅金, 工作, 父母, 老婆, 買房, 紅包, 投資, 轉帳, 貸款
+- **THEN** the system creates the worksheet with header "分類名稱" and populates 21 default expense categories: 飲食, 服飾, 家庭, 交通, 學習, 休閒, 購物, 醫療, 其他, 保險, 手續費, 稅金, 工作, 父母, 老婆, 買房, 紅包, 投資, 轉帳, 貸款, 繳信用卡
 
 #### Scenario: Initialize income categories
 
