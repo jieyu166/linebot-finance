@@ -50,7 +50,12 @@ function loadGs(files, extraGlobals) {
   const injectedKeys = Object.keys(injected);
   injectedKeys.forEach(function(k) { global[k] = injected[k]; });
 
-  const beforeKeys = new Set(Object.getOwnPropertyNames(global));
+  const beforeNames = Object.getOwnPropertyNames(global);
+  const beforeKeys = new Set(beforeNames);
+  // 記錄執行前每個既有 key 的值，用來偵測「非可設定、被 clearGlobal 設成
+  // undefined 而殘留」的 key 在這次執行後是否被重新賦值（見下方組回傳物件說明）。
+  const beforeValues = {};
+  beforeNames.forEach(function(k) { beforeValues[k] = global[k]; });
 
   files.forEach(function(f) {
     const code = fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
@@ -59,7 +64,16 @@ function loadGs(files, extraGlobals) {
 
   const result = {};
   Object.getOwnPropertyNames(global).forEach(function(k) {
-    if (!beforeKeys.has(k)) { result[k] = global[k]; }
+    if (!beforeKeys.has(k)) {
+      // 這次執行前不存在的 key —— 這次新增的。
+      result[k] = global[k];
+    } else if (beforeValues[k] === undefined && global[k] !== undefined) {
+      // 這次執行前已存在但值是 undefined（.gs 頂層 var/function 宣告在
+      // vm.runInThisContext 下是 global 上不可設定的屬性，前一次 loadGs 呼叫
+      // 開頭的 clearGlobal 刪不掉、只能設成 undefined），這次重新載入後又
+      // 被賦值了，同樣視為這次載入的產物。
+      result[k] = global[k];
+    }
   });
   injectedKeys.forEach(function(k) { result[k] = injected[k]; });
 

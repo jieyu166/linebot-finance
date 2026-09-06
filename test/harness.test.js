@@ -16,5 +16,11 @@ t('loadGs 第二次仍正確載入 SheetService.gs 的 getAccounts', () => {
   assert.strictEqual(typeof getAccounts, 'function');
 });
 
+loadGs(['SheetService.gs']);
+const gs3 = loadGs(['SheetService.gs']);
+t('loadGs 同一檔案清單第三次載入，仍正確回傳 getAccounts', () => {
+  assert.strictEqual(typeof gs3.getAccounts, 'function');
+});
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);

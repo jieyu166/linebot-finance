@@ -108,7 +108,7 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
   assert.strictEqual(row[0], '台積電');
 });
 
-// ---- buildImportSummary / importTransactions（共用同一次 loadGs，見 harness 對重複載入同檔案集合的限制） ----
+// ---- buildImportSummary / importTransactions（共用同一次三檔 loadGs，避免同一檔案清單重複呼叫） ----
 
 {
   const gs2 = loadGs(['SheetService.gs', 'TransferService.gs', 'Main.gs']);
@@ -138,6 +138,12 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     assert.ok(text.includes('新增 1 筆對方帳戶紀錄'), text);
     assert.ok(text.includes('未對應帳號：198-00*-**10443-*'), text);
     assert.ok(text.includes('多個候選'), text);
+  });
+
+  t('tryAutoPair：autoPairImportedTransactions 拋錯時回傳空結果並吞掉例外（記帳成功仍能回覆）', () => {
+    const throwingSs = { getSheetByName: () => { throw new Error('boom'); } };
+    const result2 = gs2.tryAutoPair([{ id: 'e1' }], throwingSs);
+    assert.deepStrictEqual(result2, { paired: 0, created: 0, details: [] });
   });
 
   t('buildImportSummary：無 outcome 時沿用舊行為（以 result.transactions 計算，無重複/配對行）', () => {
