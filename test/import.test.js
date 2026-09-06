@@ -90,5 +90,23 @@ t('dedupeAgainstSheet：既有品項已具體，銀行後到概括列被跳過�
   assert.strictEqual(row[0], '台積電');
 });
 
+t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，第一筆改寫後第二筆保留', () => {
+  const sheet = fakeSheet([
+    txRow('2026/08/06', '永豐銀行', '永豐證券', '支出', '投資', '定期買股', '', 9498, 'TWD', 'e2', 'PDF匯入')
+  ]);
+  const ss = fakeSs({ '交易紀錄': sheet });
+
+  const incoming = [
+    tx({ date: '2026/08/06', account: '永豐證券', category: '投資', item: '台積電', description: '普買 台積電 4股', amount: 9498 }),
+    tx({ date: '2026/08/06', account: '永豐證券', category: '投資', item: '台積電', description: '普買 台積電 4股', amount: 9498 })
+  ];
+  const result = gs.dedupeAgainstSheet(incoming, ss);
+  assert.strictEqual(result.kept.length, 1);
+  assert.strictEqual(result.skipped.length, 1);
+  assert.strictEqual(result.merged, 1);
+  const row = sheet.getRange(2, 6, 1, 2).getValues()[0];
+  assert.strictEqual(row[0], '台積電');
+});
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);
