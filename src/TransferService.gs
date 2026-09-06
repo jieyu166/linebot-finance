@@ -374,6 +374,55 @@ function dedupeAgainstSheet(transactions, ss) {
   return result;
 }
 
+/**
+ * 將舊資料中誤記在扣款帳戶下的信用卡消費列搬移到信用卡帳戶
+ * @param {string} fromAccount - 目前誤記的帳戶名稱（C 欄）
+ * @param {string} toAccount - 應搬移到的信用卡帳戶名稱
+ * @param {string} [startDate] - 起始日期（含），未填不限制
+ * @param {string} [endDate] - 結束日期（含），未填不限制
+ * @param {boolean} [dryRun] - 預設 true，只記錄不寫入；傳 false 才正式搬移
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { matched, moved, rows[] }
+ */
+function migrateCreditCardRows(fromAccount, toAccount, startDate, endDate, dryRun, ss) {
+  dryRun = dryRun !== false;
+  ss = getSpreadsheet(ss);
+  var target = findAccountByName(getAccounts(ss), toAccount);
+  if (!target) { throw new Error('找不到目標帳戶：' + toAccount); }
+  var sheet = ss.getSheetByName('交易紀錄');
+  var rows = getTransactionRows(ss);
+  var start = startDate ? parseSheetDate(startDate) : null, end = endDate ? parseSheetDate(endDate) : null;
+  var result = { matched: 0, moved: 0, rows: [] };
+  for (var i = 0; i < rows.length; i++) {
+    var tx = rowToTransaction(rows[i], i + 2);
+    if (normalizeName(tx.account) !== normalizeName(fromAccount)) { continue; }
+    if (tx.category === '繳信用卡' || tx.category === '轉帳' || !IMPORT_SOURCES[tx.source]) { continue; }
+    var d = parseSheetDate(tx.date);
+    if ((start && (!d || d < start)) || (end && (!d || d > end))) { continue; }
+    result.matched++; result.rows.push(tx.rowIndex);
+    Logger.log((dryRun ? '[預覽] ' : '[搬移] ') + '第 ' + tx.rowIndex + ' 列 ' + tx.date + ' ' + tx.item + ' ' + tx.amount);
+    if (!dryRun) { sheet.getRange(tx.rowIndex, 2, 1, 2).setValues([[target.institution, target.name]]); result.moved++; }
+  }
+  Logger.log('符合 ' + result.matched + ' 筆，已搬移 ' + result.moved + ' 筆' + (dryRun ? '（預覽，未寫入；正式執行傳 dryRun=false）' : ''));
+  return result;
+}
+
+/**
+ * 對既有「繳信用卡」但尚未配對轉帳的交易列補跑自動配對
+ * @param {boolean} [dryRun] - 預設 true，只列出未配對清單；傳 false 才正式配對
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { paired, created, details[] }
+ */
+function pairExistingCreditCardPayments(dryRun, ss) {
+  dryRun = dryRun !== false;
+  ss = getSpreadsheet(ss);
+  var targets = getTransactionRows(ss).map(function(r, i) { return rowToTransaction(r, i + 2); })
+    .filter(function(tx) { return tx.category === '繳信用卡' && !tx.transferId; });
+  Logger.log('未配對的繳信用卡列：' + targets.length + ' 筆');
+  if (dryRun) { return { paired: 0, created: 0, details: targets.map(function(t) { return t.date + ' ' + t.account + ' ' + t.amount; }) }; }
+  return autoPairImportedTransactions(targets, ss);
+}
+
 function createTransfer(params, ss) {
   ss = getSpreadsheet(ss);
   var accounts = getAccounts(ss);

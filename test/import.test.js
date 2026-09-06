@@ -236,5 +236,87 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
   });
 }
 
+// ---- migrateCreditCardRows / pairExistingCreditCardPayments ----
+
+{
+  function migAcctRow(name, institution, type, debitAccount) {
+    return [name, institution, 'TWD', 0, '', '', true, type || '', debitAccount || '', ''];
+  }
+
+  function buildMigrateFixture() {
+    const txSheet = fakeSheet([
+      txRow('2026/03/07', '第一銀行', '一銀', '支出', '購物', '南紡', '', 1901, 'TWD', 'a', 'PDF匯入'),
+      txRow('2026/03/09', '第一銀行', '一銀', '支出', '繳信用卡', '卡費', '', 3159, 'TWD', 'b', 'PDF匯入'),
+      txRow('2026/03/10', '現金', '現金', '支出', '飲食', '午餐', '', 80, 'TWD', 'c', '午餐80')
+    ]);
+    const acctSheet = fakeSheet([
+      migAcctRow('一銀', '第一銀行', '銀行', ''),
+      migAcctRow('一銀信用卡', '第一銀行', '信用卡', '一銀')
+    ]);
+    const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': acctSheet });
+    return { txSheet, acctSheet, ss };
+  }
+
+  t('migrateCreditCardRows：dryRun 預設不寫入，matched 1', () => {
+    const { txSheet, ss } = buildMigrateFixture();
+    const result = gs.migrateCreditCardRows('一銀', '一銀信用卡', '', '', true, ss);
+    assert.strictEqual(result.matched, 1);
+    assert.strictEqual(result.moved, 0);
+    const row1 = txSheet.getRange(2, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row1[2], '一銀');
+  });
+
+  t('migrateCreditCardRows：dryRun=false 正式搬移，B/C 欄改為目標帳戶，繳信用卡列與手動記帳列不動', () => {
+    const { txSheet, ss } = buildMigrateFixture();
+    const result = gs.migrateCreditCardRows('一銀', '一銀信用卡', '', '', false, ss);
+    assert.strictEqual(result.matched, 1);
+    assert.strictEqual(result.moved, 1);
+
+    const row1 = txSheet.getRange(2, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row1[1], '第一銀行');
+    assert.strictEqual(row1[2], '一銀信用卡');
+
+    const row2 = txSheet.getRange(3, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row2[2], '一銀');
+
+    const row3 = txSheet.getRange(4, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row3[2], '現金');
+  });
+
+  t('migrateCreditCardRows：日期區間限制生效，startDate 晚於符合列日期時 matched 0', () => {
+    const { ss } = buildMigrateFixture();
+    const result = gs.migrateCreditCardRows('一銀', '一銀信用卡', '2026/03/08', '', true, ss);
+    assert.strictEqual(result.matched, 0);
+  });
+
+  t('migrateCreditCardRows：目標帳戶不存在時拋錯', () => {
+    const { ss } = buildMigrateFixture();
+    assert.throws(() => gs.migrateCreditCardRows('一銀', '不存在帳戶', '', '', true, ss), /找不到目標帳戶/);
+  });
+
+  t('pairExistingCreditCardPayments：dryRun 回傳未配對列清單，不寫入', () => {
+    const { ss } = buildMigrateFixture();
+    const result = gs.pairExistingCreditCardPayments(true, ss);
+    assert.strictEqual(result.paired, 0);
+    assert.strictEqual(result.created, 0);
+    assert.deepStrictEqual(result.details, ['2026/03/09 一銀 3159']);
+  });
+
+  t('pairExistingCreditCardPayments：dryRun=false 呼叫 autoPairImportedTransactions 完成配對並新增對方帳戶列', () => {
+    const { txSheet, ss } = buildMigrateFixture();
+    const result = gs.pairExistingCreditCardPayments(false, ss);
+    assert.strictEqual(result.paired, 1);
+    assert.strictEqual(result.created, 1);
+
+    const rows = txSheet.getRange(2, 1, txSheet.getLastRow() - 1, 12).getValues();
+    const cardIncome = rows.filter(r => r[2] === '一銀信用卡' && r[3] === '收入')[0];
+    const cardBill = rows.filter(r => r[2] === '一銀' && r[4] === '繳信用卡')[0];
+    assert.ok(cardIncome, 'expected 一銀信用卡 收入 row');
+    assert.ok(cardBill, 'expected 繳信用卡 row');
+    assert.strictEqual(cardIncome[11], cardBill[11]);
+    assert.ok(cardBill[11], 'transferId should be set');
+  });
+}
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);
