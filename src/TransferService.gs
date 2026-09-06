@@ -319,6 +319,61 @@ function autoPairImportedTransactions(newTxs, ss) {
   return result;
 }
 
+/**
+ * 匯入交易的來源標記集合（視為「已匯入」而非手動記帳）
+ */
+var IMPORT_SOURCES = { 'PDF匯入': true, '文字匯入': true, '自動配對': true };
+
+/**
+ * 證券概括品項（尚未寫入具體股名）的判斷樣式
+ */
+var GENERIC_STOCK_ITEMS = /定期買股|交割|證券|股票/;
+
+/**
+ * 判斷交易是否與既有匯入交易重複
+ * @param {Object} tx - 待檢查交易
+ * @param {Object[]} existingTxs - 既有交易清單
+ * @param {Object} [options] - { dayWindow }，預設 2 天
+ * @returns {Object|null} 重複的既有交易；無重複回傳 null
+ */
+function isDuplicateImport(tx, existingTxs, options) {
+  var dayWindow = (options && options.dayWindow !== undefined) ? options.dayWindow : 2;
+  var amount = Math.abs(parseAmount(tx.amount));
+  for (var i = 0; i < existingTxs.length; i++) {
+    var e = existingTxs[i];
+    if (!IMPORT_SOURCES[e.source] || e.type !== tx.type) { continue; }
+    if (normalizeName(e.account) !== normalizeName(tx.account) || (e.currency || 'TWD') !== (tx.currency || 'TWD')) { continue; }
+    if (Math.abs(e.amount - amount) >= 0.005 || dateDiffDays(e.date, tx.date) > dayWindow) { continue; }
+    return e;
+  }
+  return null;
+}
+
+/**
+ * 將匯入交易清單與試算表既有交易去重，重複時視情況合併股名到既有列
+ * @param {Object[]} transactions - 匯入的交易清單
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { kept, skipped, merged }
+ */
+function dedupeAgainstSheet(transactions, ss) {
+  ss = getSpreadsheet(ss);
+  var sheet = ss.getSheetByName('交易紀錄');
+  var existing = getTransactionRows(ss).map(function(r, i) { return rowToTransaction(r, i + 2); });
+  var used = {}, result = { kept: [], skipped: [], merged: 0 };
+  transactions.forEach(function(tx) {
+    var dup = isDuplicateImport(tx, existing.filter(function(e) { return !used[e.id]; }));
+    if (!dup) { result.kept.push(tx); return; }
+    used[dup.id] = true;
+    var newHasStock = (tx.category === '投資' || tx.category === '投資獲利') && tx.item && !GENERIC_STOCK_ITEMS.test(tx.item);
+    if (newHasStock && GENERIC_STOCK_ITEMS.test(dup.item || '')) {
+      sheet.getRange(dup.rowIndex, 6, 1, 2).setValues([[tx.item, tx.description || '']]);
+      result.merged++;
+    }
+    result.skipped.push(tx);
+  });
+  return result;
+}
+
 function createTransfer(params, ss) {
   ss = getSpreadsheet(ss);
   var accounts = getAccounts(ss);
