@@ -171,12 +171,12 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
 
     + '## balance／counterparty 欄位（銀行帳戶明細必填）\n'
     + '"balance" 欄位：這一列交易完成後的餘額／結餘數字（不含千分位逗號），銀行帳戶明細每一列都要填；信用卡帳單、證券對帳單沒有餘額欄則填 null。\n'
-    + '"counterparty" 欄位：這一列摘要／備註中的對方帳號、轉入帳戶或原始備註文字（含數字），原文照抄，無則填空字串 ""；系統會用這個欄位補到 description 裡，不需要你手動重複附加。\n\n'
+    + '"counterparty" 欄位：這一列摘要／備註中的對方帳號、轉入帳戶或原始備註文字（含數字），原文照抄，無則填空字串 ""；系統會用這個欄位補到 description 裡，不需要你手動重複附加。\n'
+    + '"openingBalance" 欄位：僅每個帳號區塊「第一筆」交易需要填寫該區塊的上期餘額／期初餘額數字（不含千分位逗號），帳單上若無此資訊則填 null；同一區塊其餘列一律填 null。\n\n'
 
     + '## 交易分類規則\n'
     + '1. 一般消費：根據商店名稱判斷最適合的支出分類。\n'
     + '2. 回饋金/現金回饋：金額為負數且含「回饋」→ type:收入, category:回饋。\n'
-    + '   信用卡帳單中品項或摘要含「回饋」但不含「入帳戶」的列（無論金額欄位在原文是否已顯示負號、或 OCR 擷取後變成正數）→ 一律 type:收入, category:回饋，account 記在該張卡的信用卡帳戶，amount 用絕對值。例如「iLEO卡行動支付回饋」「現金回饋-iLEO信用卡」「UBear現金回饋」都是這一類，不可誤判為 type:支出。\n'
     + '   「大戶回饋」「幣倍回饋」「折讓款」→ type:收入, category:回饋。\n'
     + '   特殊情況：「大戶消費回饋入帳戶_國內 207 元」金額欄為 0，實際金額在描述中，請提取 207。\n'
     + '3. 國外交易服務費：→ type:支出, category:手續費。\n'
@@ -192,11 +192,9 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '   「現金提」「ATM提款」「跨行提款」→ type:支出, category:轉帳。\n'
     + '8. 信用卡款扣繳（從銀行帳戶扣信用卡費，例：卡款扣繳、信用卡自扣、信用卡款）→ type:支出, category:繳信用卡。\n'
     + '   「卡費換匯」→ type:支出, category:繳信用卡。「媒體轉帳 台新卡費」「玉山卡款扣繳」「中信卡」→ type:支出, category:繳信用卡。\n'
-    + '9. 「薪資」「電匯 醫療財團法人」→ type:收入, category:薪資。「電匯」摘要且對方單位含「醫院」「醫療」「診所」「財團法人」等字樣（即使名稱被截斷，如「奇美醫療財團法」）→ type:收入, category:薪資。\n'
+    + '9. 「薪資」「電匯 醫療財團法人」→ type:收入, category:薪資。\n'
     + '10. 愛金卡、一卡通、悠遊卡加值 → type:支出, category:交通。「優步-餐廳」「Uber Eats」→ type:支出, category:飲食。\n'
-    + '    ANTHROPIC/CLAUDE、OPENAI/CHATGPT、KOBO、BOOK WALKER/BOOK☆WALKER 等訂閱／電子書服務 → type:支出, category:學習（不要歸類為購物）。\n'
     + '    momo、蝦皮、PChome → type:支出, category:購物。易遊網、NETFLIX、XSOLLA/PIKMIN、GOOGLE PLAY、YOUTUBE、PressPlay → type:支出, category:休閒。\n'
-    + '    信用卡帳單中「永豐自扣已入帳」「自動換匯自扣已入帳」等付款確認行（同第 1 條跳過規則）：即使金額被 OCR 擷取成正數也一律跳過，不要記為「國外交易服務費」或任何其他分類的交易。\n'
     + '11. 連結帳戶交易、連結帳戶扣款、線上支付、電子支付，若無明確商店或用途可判斷，多數先歸為 type:支出, category:飲食。\n'
     + '12. 發票獎金：→ type:收入, category:獎金。\n'
     + '13. 「連加*」前綴為感應支付消費，去除前綴後保留商店名稱。\n'
@@ -218,7 +216,7 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + incomeCategories.join('、') + '\n\n'
 
     + '## 輸出格式（嚴格 JSON）\n'
-    + '{"bank":"銀行名稱","statementType":"信用卡或銀行帳戶或證券","transactions":[{"date":"yyyy/MM/dd","type":"支出或收入","category":"分類名稱","item":"品項","description":"明細描述","institution":"金融機構","account":"帳戶清單中的帳戶名稱或空字串","accountNumber":"銀行帳戶明細的帳號原文，其他情況填空字串","currency":"幣別","amount":金額正數,"balance":這筆交易後的餘額數字或null,"counterparty":"對方帳號／轉入帳戶／備註原文，無則空字串"}],"skipped":跳過的行數,"statementTotals":[{"currency":"TWD","newCharges":本期新增款項數字}]（僅信用卡帳單填，其他帳單類型省略此欄位）}\n\n'
+    + '{"bank":"銀行名稱","statementType":"信用卡或銀行帳戶或證券","transactions":[{"date":"yyyy/MM/dd","type":"支出或收入","category":"分類名稱","item":"品項","description":"明細描述","institution":"金融機構","account":"帳戶清單中的帳戶名稱或空字串","accountNumber":"銀行帳戶明細的帳號原文，其他情況填空字串","currency":"幣別","amount":金額正數,"balance":這筆交易後的餘額數字或null,"counterparty":"對方帳號／轉入帳戶／備註原文，無則空字串","openingBalance":該帳號區塊第一筆才填的上期餘額／期初餘額數字，其餘列填null}],"skipped":跳過的行數,"statementTotals":[{"currency":"TWD","newCharges":本期新增款項數字}]（僅信用卡帳單填，其他帳單類型省略此欄位）}\n\n'
 
     + '## 範例\n\n'
 
@@ -400,6 +398,8 @@ function extractFxCardPayment(parsed, accounts) {
  * 規則：同一 accountNumber 分組（保留原順序），逐一比較連續兩列的 balance；
  * |Δbalance| 與 amount 相差 < 0.01 時，依 Δbalance 正負改寫 type；
  * 任一餘額缺漏或金額對不上則該列方向維持原樣。
+ * 每個分組的第一列若有 openingBalance（該帳號區塊的上期餘額／期初餘額），
+ * 則改用 delta = balance − openingBalance 比對，同樣規則修正方向。
  * @param {Object} parsed - { statementType, transactions }
  * @returns {Object} parsed（就地修改並回傳）
  */
@@ -415,6 +415,16 @@ function fixDirectionByBalance(parsed) {
   });
   order.forEach(function(key) {
     var list = groups[key];
+    if (list.length > 0) {
+      var first = list[0];
+      if (typeof first.openingBalance === 'number' && typeof first.balance === 'number') {
+        var delta0 = first.balance - first.openingBalance;
+        var amount0 = Number(first.amount) || 0;
+        if (Math.abs(Math.abs(delta0) - amount0) < 0.01) {
+          first.type = delta0 > 0 ? '收入' : '支出';
+        }
+      }
+    }
     for (var i = 1; i < list.length; i++) {
       var prev = list[i - 1], cur = list[i];
       if (typeof prev.balance !== 'number' || typeof cur.balance !== 'number') { continue; }
@@ -476,17 +486,23 @@ var EXPENSE_CATEGORY_SYNONYMS = {
 /** 分類同義詞對照表（收入） */
 var INCOME_CATEGORY_SYNONYMS = {};
 
-/** 分類關鍵字規則（商店/服務名稱 → 分類），僅在 LLM 分類非法時套用 */
+/**
+ * 分類關鍵字規則（商店/服務名稱 → 分類）
+ * 支出列：命中即強制覆寫 LLM 給的分類（使用者指定的商店對應優先於模型判斷）；
+ * 收入列不套用本規則。
+ */
 var CATEGORY_KEYWORD_RULES = [
-  { pattern: /統一超商|愛金卡|一卡通|悠遊卡/, category: '交通' },
+  { pattern: /統一超商|愛金卡|一卡通|悠遊卡|icash\s*加值|gogoro|中油|加油|停車|臺鐵|台鐵|高鐵|捷運/i, category: '交通' },
   { pattern: /優步-|uber\s*eats|foodpanda/i, category: '飲食' },
-  { pattern: /易遊網|netflix|xsolla|pikmin|google\s*play|youtube|pressplay/i, category: '休閒' },
-  { pattern: /momo|蝦皮|pchome/i, category: '購物' },
-  { pattern: /book|kobo|anthropic|openai|chatgpt|claude/i, category: '學習' }
+  { pattern: /易遊網|eztravel|agoda|booking|netflix|xsolla|pikmin|google\s*play|youtube|pressplay/i, category: '休閒' },
+  { pattern: /momo|蝦皮|pchome|amazon/i, category: '購物' },
+  { pattern: /book|kobo|anthropic|openai|chatgpt|claude/i, category: '學習' },
+  { pattern: /保險/, category: '保險' }
 ];
 
 /**
- * 修正每筆交易的分類：先套同義詞對照，仍非法時用商店關鍵字規則，最後 fallback「其他」
+ * 修正每筆交易的分類：支出列先套商店關鍵字規則（強制覆寫，優先於 LLM 判斷），
+ * 未命中則沿用「同義詞對照 → 合法分類保留 → fallback其他」邏輯；收入列不套關鍵字規則。
  * @param {Object} parsed - { transactions }
  * @param {string[]} expenseCategories - 支出分類清單
  * @param {string[]} incomeCategories - 收入分類清單
@@ -503,19 +519,21 @@ function normalizeCategories(parsed, expenseCategories, incomeCategories) {
     var synonyms = isExpense ? EXPENSE_CATEGORY_SYNONYMS : INCOME_CATEGORY_SYNONYMS;
     var category = tx.category;
 
+    if (isExpense) {
+      var text = (tx.item || '') + ' ' + (tx.description || '');
+      for (var i = 0; i < CATEGORY_KEYWORD_RULES.length; i++) {
+        var rule = CATEGORY_KEYWORD_RULES[i];
+        if (rule.pattern.test(text) && validSet[rule.category]) {
+          tx.category = rule.category;
+          return;
+        }
+      }
+    }
+
     if (validSet[category] && category !== '其他') { return; }
     if (synonyms[category] && validSet[synonyms[category]]) {
       tx.category = synonyms[category];
       return;
-    }
-
-    var text = (tx.item || '') + ' ' + (tx.description || '');
-    for (var i = 0; i < CATEGORY_KEYWORD_RULES.length; i++) {
-      var rule = CATEGORY_KEYWORD_RULES[i];
-      if (rule.pattern.test(text) && validSet[rule.category]) {
-        tx.category = rule.category;
-        return;
-      }
     }
 
     tx.category = '其他';
@@ -537,6 +555,44 @@ function forceCardPaymentCategory(parsed) {
       tx.category = '繳信用卡';
     }
   });
+  return parsed;
+}
+
+/**
+ * 信用卡帳單列修正（statementType === '信用卡' 時套用，需在 extractFxCardPayment 之前呼叫）：
+ * (a) 丟棄繳款確認行（自扣已入帳／自動扣繳／自動轉帳繳款／已收到／繳款），計入 parsed.skipped；
+ * (b) 品項或描述含「回饋」且不含「入帳戶」的列，一律強制 type:收入, category:回饋，amount 取絕對值；
+ * (c) 品項符合「國外交易手續費／服務費」的列，強制 category:手續費, type:支出。
+ * @param {Object} parsed - { statementType, skipped, transactions }
+ * @returns {Object} parsed
+ */
+function fixCardStatementRows(parsed) {
+  if (parsed.statementType !== '信用卡') { return parsed; }
+  var txs = parsed.transactions || [];
+  var dropped = 0;
+  var kept = txs.filter(function(tx) {
+    var text = (tx.item || '') + (tx.description || '');
+    if (/自扣已入帳|自動扣繳|自動轉帳繳款|已收到|繳款/.test(text)) {
+      dropped++;
+      return false;
+    }
+    return true;
+  });
+  kept.forEach(function(tx) {
+    var text = (tx.item || '') + (tx.description || '');
+    if (text.indexOf('回饋') >= 0 && text.indexOf('入帳戶') < 0) {
+      tx.type = '收入';
+      tx.category = '回饋';
+      tx.amount = Math.abs(parseAmount(tx.amount));
+      return;
+    }
+    if (/國外交易(手續|服務)費/.test(tx.item || '')) {
+      tx.category = '手續費';
+      tx.type = '支出';
+    }
+  });
+  parsed.transactions = kept;
+  parsed.skipped = (parsed.skipped || 0) + dropped;
   return parsed;
 }
 
@@ -691,6 +747,11 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts)
       } else {
         tx.balance = null;
       }
+      if (typeof tx.openingBalance !== 'undefined' && tx.openingBalance !== null && tx.openingBalance !== '') {
+        tx.openingBalance = Number(tx.openingBalance);
+      } else {
+        tx.openingBalance = null;
+      }
       return tx;
     });
   }
@@ -704,6 +765,7 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts)
   fixDirectionByBalance(parsed);
   appendCounterparty(parsed);
   forceCardPaymentCategory(parsed);
+  fixCardStatementRows(parsed);
   parsed = extractFxCardPayment(parsed, accounts);
   var resolved = resolveImportedAccounts(parsed, accounts);
   parsed.transactions = resolved.transactions;

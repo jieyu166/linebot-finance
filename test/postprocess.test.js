@@ -104,6 +104,17 @@ t('fixDirectionByBalance：金額與餘額差不符時保留原方向', () => {
   assert.strictEqual(parsed.transactions[1].type, '支出');
 });
 
+t('fixDirectionByBalance：區塊第一列有 openingBalance 時依 delta 修正方向（期初 17,252 → 餘額 17,752，金額 500 → 收入）', () => {
+  const parsed = {
+    statementType: '銀行帳戶',
+    transactions: [
+      tx({ accountNumber: 'B', item: '第一筆', type: '支出', amount: 500, balance: 17752, openingBalance: 17252 })
+    ]
+  };
+  gs.fixDirectionByBalance(parsed);
+  assert.strictEqual(parsed.transactions[0].type, '收入');
+});
+
 t('fixDirectionByBalance：非銀行帳戶類型不處理', () => {
   const parsed = {
     statementType: '信用卡',
@@ -188,9 +199,57 @@ t('normalizeCategories：關鍵字 Anthropic/OpenAI → 學習', () => {
 });
 
 t('normalizeCategories：合法分類不變動', () => {
-  const parsed = { transactions: [tx({ type: '支出', category: '交通', item: '加油' })] };
+  const parsed = { transactions: [tx({ type: '支出', category: '交通', item: '停放車資' })] };
   gs.normalizeCategories(parsed, EXP, INC);
   assert.strictEqual(parsed.transactions[0].category, '交通');
+});
+
+t('normalizeCategories：關鍵字規則優先於 LLM 給的合法分類（BOOK☆WAL 即使 LLM 標休閒也強制改學習）', () => {
+  const parsed = { transactions: [tx({ type: '支出', category: '休閒', item: 'BOOK☆WAL' })] };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '學習');
+});
+
+t('normalizeCategories：易遊網即使 LLM 標其他也覆寫為休閒', () => {
+  const parsed = { transactions: [tx({ type: '支出', category: '其他', item: '易遊網訂票' })] };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '休閒');
+});
+
+t('normalizeCategories：無關鍵字命中且分類合法時不變動', () => {
+  const parsed = { transactions: [tx({ type: '支出', category: '飲食', item: '午餐便當' })] };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '飲食');
+});
+
+t('normalizeCategories：agoda/booking → 休閒（新關鍵字）', () => {
+  const parsed = { transactions: [tx({ type: '支出', category: '購物', item: 'agoda.com 訂房' })] };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '休閒');
+});
+
+t('normalizeCategories：Amazon → 購物（新關鍵字）', () => {
+  const parsed = { transactions: [tx({ type: '支出', category: '其他', item: 'AMAZON.COM' })] };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '購物');
+});
+
+t('normalizeCategories：icash 加值 → 交通（新關鍵字）', () => {
+  const parsed = { transactions: [tx({ type: '支出', category: '其他', item: 'icash 加值' })] };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '交通');
+});
+
+t('normalizeCategories：中油/加油/停車/高鐵/捷運 → 交通（新關鍵字）', () => {
+  const parsed = { transactions: [tx({ type: '支出', category: '其他', item: '中油加油站' })] };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '交通');
+});
+
+t('normalizeCategories：保險 → 保險（新關鍵字）', () => {
+  const parsed = { transactions: [tx({ type: '支出', category: '其他', item: '南山人壽保險費' })] };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '保險');
 });
 
 t('normalizeCategories：支出無法對應時 fallback 其他', () => {
@@ -223,6 +282,62 @@ t('forceCardPaymentCategory：純換匯不含卡費/卡款/信用卡字樣不強
   };
   gs.forceCardPaymentCategory(parsed);
   assert.strictEqual(parsed.transactions[0].category, '轉帳');
+});
+
+// ---------- fixCardStatementRows ----------
+
+t('fixCardStatementRows：自扣已入帳等繳款確認行丟棄並計入 skipped', () => {
+  const parsed = {
+    statementType: '信用卡', skipped: 0,
+    transactions: [
+      tx({ item: '永豐自扣已入帳,謝謝!', description: '', amount: 3159 }),
+      tx({ item: '正常消費', amount: 100 })
+    ]
+  };
+  gs.fixCardStatementRows(parsed);
+  assert.strictEqual(parsed.transactions.length, 1);
+  assert.strictEqual(parsed.transactions[0].item, '正常消費');
+  assert.strictEqual(parsed.skipped, 1);
+});
+
+t('fixCardStatementRows：含回饋（非入帳戶）的列強制收入/回饋，金額取絕對值', () => {
+  const parsed = {
+    statementType: '信用卡', skipped: 0,
+    transactions: [tx({ item: '現金回饋-iLEO信用卡', description: '', type: '支出', category: '其他', amount: -58 })]
+  };
+  gs.fixCardStatementRows(parsed);
+  assert.strictEqual(parsed.transactions[0].type, '收入');
+  assert.strictEqual(parsed.transactions[0].category, '回饋');
+  assert.strictEqual(parsed.transactions[0].amount, 58);
+});
+
+t('fixCardStatementRows：含「回饋入帳戶」的列不受回饋規則影響（由 dropZeroAndRewardDeposits 處理，此函式略過）', () => {
+  const parsed = {
+    statementType: '信用卡', skipped: 0,
+    transactions: [tx({ item: '大戶消費回饋入帳戶_國內', description: '', type: '支出', category: '其他', amount: 207 })]
+  };
+  gs.fixCardStatementRows(parsed);
+  assert.strictEqual(parsed.transactions[0].type, '支出');
+  assert.strictEqual(parsed.transactions[0].category, '其他');
+});
+
+t('fixCardStatementRows：國外交易手續費列強制分類為手續費/支出', () => {
+  const parsed = {
+    statementType: '信用卡', skipped: 0,
+    transactions: [tx({ item: '國外交易手續費(670.00 TWD)', description: '', type: '支出', category: '其他', amount: 10 })]
+  };
+  gs.fixCardStatementRows(parsed);
+  assert.strictEqual(parsed.transactions[0].category, '手續費');
+  assert.strictEqual(parsed.transactions[0].type, '支出');
+});
+
+t('fixCardStatementRows：非信用卡帳單不處理', () => {
+  const parsed = {
+    statementType: '銀行帳戶', skipped: 0,
+    transactions: [tx({ item: '永豐自扣已入帳', amount: 100 })]
+  };
+  gs.fixCardStatementRows(parsed);
+  assert.strictEqual(parsed.transactions.length, 1);
 });
 
 // ---------- dropSettlementBuyRows ----------
