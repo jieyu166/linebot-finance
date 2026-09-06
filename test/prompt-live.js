@@ -33,9 +33,11 @@ if (!apiKey) {
 
 const name = (process.argv[2] || '').replace(/\.txt$/, '');
 if (!name) {
-  console.log('用法：node test/prompt-live.js <fixture 名稱，如 sinopac-bank-2026-08>');
+  console.log('用法：node test/prompt-live.js <fixture 名稱，如 sinopac-bank-2026-08> [model 名稱，如 gpt-4o]');
   process.exit(1);
 }
+const modelArg = process.argv[3] || null;
+console.log('model: ' + (modelArg || 'gpt-4.1-mini'));
 const fixturePath = path.join(__dirname, 'fixtures', name + '.txt');
 if (!fs.existsSync(fixturePath)) {
   console.log('找不到 fixture：' + fixturePath);
@@ -76,7 +78,11 @@ function curlFetch(url, options) {
 }
 
 const gs = loadGs(['SheetService.gs', 'TransferService.gs', 'Config.gs', 'OpenAIService.gs'], {
-  PropertiesService: { getScriptProperties: function() { return { getProperty: function() { return apiKey; } }; } },
+  PropertiesService: { getScriptProperties: function() { return { getProperty: function(key) {
+    if (key === 'OPENAI_API_KEY') { return apiKey; }
+    if (key === 'OPENAI_MODEL') { return modelArg; }
+    return null;
+  } }; } },
   UrlFetchApp: { fetch: curlFetch }
 });
 
@@ -98,8 +104,11 @@ const accounts = gs.DEFAULT_ACCOUNTS.map(function(row) {
   };
 });
 
-const EXPENSE = ['飲食', '交通', '購物', '娛樂', '醫療', '學習', '居家', '手續費', '轉帳', '貸款', '繳信用卡', '投資', '父母', '其他'];
-const INCOME = ['薪資', '獎金', '回饋', '利息', '股利', '投資獲利', '轉帳', '其他'];
+// 與 Config.gs initializeSheets() 建立的預設分類清單一致，確保本機驗證時
+// normalizeCategories 套用的「合法分類」與正式試算表相同。
+const EXPENSE = ['飲食', '服飾', '家庭', '交通', '學習', '休閒', '購物', '醫療', '其他', '保險',
+  '手續費', '稅金', '工作', '父母', '老婆', '買房', '紅包', '投資', '轉帳', '貸款', '繳信用卡'];
+const INCOME = ['薪資', '利息', '兼職', '獎金', '回饋', '投資獲利', '股利', '家人給', '保險', '其他', '轉帳'];
 
 const text = gs.stripGarbledLines(fs.readFileSync(fixturePath, 'utf8'));
 console.log('=== fixture: ' + name + '（過濾後 ' + text.split('\n').length + ' 行）===');
@@ -109,6 +118,9 @@ const result = gs.parsePdfWithOpenAI(text, EXPENSE, INCOME, accounts);
 console.log('bank: ' + result.bank + ' / statementType: ' + result.statementType + ' / skipped: ' + result.skipped);
 if ((result.unmatchedAccountNumbers || []).length > 0) {
   console.log('未對應帳號: ' + result.unmatchedAccountNumbers.join(', '));
+}
+if (result.statementTotals && result.statementTotals.length > 0) {
+  console.log('statementTotals: ' + JSON.stringify(result.statementTotals));
 }
 console.log('');
 
@@ -122,9 +134,16 @@ txs.forEach(function(tx, i) {
     tx.account + '(' + tx.currency + ')',
     String(tx.amount) + (tx.fxAmount ? ' [fx ' + tx.fxAmount + ']' : ''),
     tx.item,
-    tx.description
+    tx.description,
+    tx.counterparty ? ('[cp: ' + tx.counterparty + ']') : '',
+    (tx.balance !== undefined && tx.balance !== null) ? ('[bal ' + tx.balance + ']') : ''
   ].join(' | '));
 });
+
+if (result.notes && result.notes.length > 0) {
+  console.log('\n--- notes ---');
+  result.notes.forEach(function(n) { console.log('ℹ ' + n); });
+}
 
 console.log('\n--- 依帳戶／幣別統計 ---');
 const groups = {};

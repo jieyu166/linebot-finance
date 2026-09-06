@@ -33,7 +33,7 @@ LINE Bot + Google Apps Script + OpenAI 個人記帳系統
     │
     ▼ (Webhook POST)
 Google Apps Script (Web App)
-    ├── OpenAI API (gpt-4o-mini) — 解析記帳訊息
+    ├── OpenAI API (gpt-4.1-mini) — 解析記帳訊息
     ├── Google Sheets — 儲存交易紀錄、帳戶主檔
     ├── Google Drive — PDF OCR 文字擷取
     └── LINE Reply API — 回覆確認訊息
@@ -165,7 +165,7 @@ openspec/
 4. 從試算表「擴充功能 → Apps Script」開啟編輯器
 5. 建立 7 個 .gs 檔案（含 `TransferService.gs`），貼入 `src/` 下的程式碼
 6. 啟用 Drive API 進階服務
-7. 設定 Script Properties（OPENAI_API_KEY、LINE_CHANNEL_SECRET、LINE_CHANNEL_ACCESS_TOKEN、SHEET_ID）
+7. 設定 Script Properties（OPENAI_API_KEY、LINE_CHANNEL_SECRET、LINE_CHANNEL_ACCESS_TOKEN、SHEET_ID；可選填 OPENAI_MODEL 覆寫預設的 gpt-4.1-mini）
 8. 執行 `initializeSheets()` 建立工作表結構（已存在的工作表不會被覆蓋）
 9. 在「帳戶管理」工作表填入各帳戶的初始餘額與初始日期
 10. 部署為 Web App（存取權限：所有人）
@@ -196,7 +196,7 @@ npm test
 ## 技術
 
 - **後端**：Google Apps Script (JavaScript)
-- **AI**：OpenAI gpt-4o-mini（JSON mode）
+- **AI**：OpenAI gpt-4.1-mini（JSON mode），可用 Script Property OPENAI_MODEL 覆寫
 - **資料庫**：Google Sheets
 - **PDF OCR**：Google Drive API
 - **前端**：LINE Messaging API

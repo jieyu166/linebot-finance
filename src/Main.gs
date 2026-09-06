@@ -522,6 +522,11 @@ function buildImportSummary(result, source, outcome) {
       replyText += '  ⚠ ' + result.fxWarnings[w] + '\n';
     }
   }
+  if (result.notes && result.notes.length > 0) {
+    for (var n = 0; n < result.notes.length; n++) {
+      replyText += '  ℹ ' + result.notes[n] + '\n';
+    }
+  }
 
   return replyText.trim();
 }
