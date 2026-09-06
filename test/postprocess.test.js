@@ -246,6 +246,17 @@ t('normalizeCategories：中油/加油/停車/高鐵/捷運 → 交通（新關�
   assert.strictEqual(parsed.transactions[0].category, '交通');
 });
 
+t('normalizeCategories：國外交易服務費列（item 本身即手續費）即使 description 含商店關鍵字也不被覆寫（fixCardStatementRows 的決定性分類優先）', () => {
+  const parsed = {
+    transactions: [tx({
+      type: '支出', category: '手續費', item: '國外交易服務費',
+      description: 'ANTHROPIC* CLAUDE SUB 國外交易服務費 (4304)'
+    })]
+  };
+  gs.normalizeCategories(parsed, EXP, INC);
+  assert.strictEqual(parsed.transactions[0].category, '手續費');
+});
+
 t('normalizeCategories：保險 → 保險（新關鍵字）', () => {
   const parsed = { transactions: [tx({ type: '支出', category: '其他', item: '南山人壽保險費' })] };
   gs.normalizeCategories(parsed, EXP, INC);

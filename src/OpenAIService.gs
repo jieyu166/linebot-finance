@@ -519,7 +519,10 @@ function normalizeCategories(parsed, expenseCategories, incomeCategories) {
     var synonyms = isExpense ? EXPENSE_CATEGORY_SYNONYMS : INCOME_CATEGORY_SYNONYMS;
     var category = tx.category;
 
-    if (isExpense) {
+    // 「國外交易手續/服務費」列的分類由 fixCardStatementRows 決定性判斷（item 本身即為手續費字樣），
+    // 不可再被 description 中夾帶的商店名稱關鍵字覆寫（例如 ANTHROPIC 訂閱的服務費列）。
+    var isFeeRow = /國外交易(手續|服務)費/.test(tx.item || '');
+    if (isExpense && !isFeeRow) {
       var text = (tx.item || '') + ' ' + (tx.description || '');
       for (var i = 0; i < CATEGORY_KEYWORD_RULES.length; i++) {
         var rule = CATEGORY_KEYWORD_RULES[i];
