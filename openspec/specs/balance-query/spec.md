@@ -46,12 +46,17 @@ When `isCommand` is true, the system SHALL call `handleBalanceCommand(replyToken
 ---
 ### Requirement: Reply with all account balances
 
-The system SHALL reply with a formatted list of all active accounts and their current balances when `accountName` is null. The reply SHALL begin with "💰 帳戶餘額一覽（yyyy/MM/dd）" where the date is today in Asia/Taipei timezone. Each account SHALL appear on its own line showing the account name and current balance. TWD balances SHALL be formatted with a dollar sign and thousands separators (e.g., "$12,500"). Non-TWD balances SHALL include the currency code after the amount (e.g., "$1,230 USD"). The reply SHALL end with the total count of accounts.
+The system SHALL reply with a formatted list of all active accounts and their current balances when `accountName` is null, built by a pure `buildAllBalancesReply(balances, today)` function. The reply SHALL begin with "💰 帳戶餘額一覽（yyyy/MM/dd）" where the date is today in Asia/Taipei timezone. The remaining accounts SHALL be split into two sections, each on its own line, in this order: a "【資產】" section listing every non-信用卡 account, followed by a "【信用卡】" section listing every 信用卡-type account; a section header SHALL be omitted when that group is empty. Each account SHALL appear on its own line via `formatBalanceLine(balance)`: non-信用卡 accounts show the account name and current balance (TWD formatted with a dollar sign and thousands separators, e.g. "$12,500"; non-TWD balances append the currency code, e.g. "$1,230 USD"); 信用卡 accounts show "未繳 " followed by the formatted absolute value of the (negative) currentBalance, e.g. "永豐信用卡：未繳 $0". The reply SHALL end with the total count of accounts across both sections.
 
 #### Scenario: All accounts listed with correct balance format
 
-- **WHEN** user sends "餘額" and 3 active accounts exist: 現金 ($12,500 TWD), 永豐大戶 ($210,973 TWD), 永豐外幣 ($1,230 USD)
-- **THEN** the system replies with a message starting "💰 帳戶餘額一覽" and listing all three accounts with correct amounts and currency labels
+- **WHEN** user sends "餘額" and 3 active accounts exist: 現金 ($12,500 TWD, type 銀行), 永豐大戶 ($210,973 TWD, type 銀行), 永豐外幣 ($1,230 USD, type 銀行)
+- **THEN** the system replies with a message starting "💰 帳戶餘額一覽", followed by "【資產】" and all three accounts with correct amounts and currency labels, then "共 3 個帳戶" (no "【信用卡】" section, since none is type 信用卡)
+
+#### Scenario: Credit-card accounts shown in a separate section as unpaid amount
+
+- **WHEN** user sends "餘額" and active accounts include 永豐大戶 (currentBalance 0, type 銀行) and 永豐信用卡 (currentBalance -0, type 信用卡)
+- **THEN** the reply lists "【資產】" with "永豐大戶：$0", then "【信用卡】" with "永豐信用卡：未繳 $0", then "共 2 個帳戶"
 
 #### Scenario: No accounts configured
 

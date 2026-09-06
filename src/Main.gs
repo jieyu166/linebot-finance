@@ -276,8 +276,9 @@ function detectBalanceCommand(text) {
  */
 function formatAmount(amount) {
   amount = Number(amount) || 0;
-  var sign = amount < 0 ? '-' : '';
-  return sign + '$' + Math.abs(amount).toLocaleString();
+  var abs = Math.abs(amount);
+  var hasCents = Math.round(abs * 100) % 100 !== 0;
+  return (amount < 0 ? '-' : '') + '$' + abs.toLocaleString('en-US', { minimumFractionDigits: hasCents ? 2 : 0, maximumFractionDigits: 2 });
 }
 
 /**
@@ -295,6 +296,45 @@ function formatBalanceAmount(amount, currency) {
 }
 
 /**
+ * 格式化單一帳戶餘額一行文字：信用卡顯示「未繳」金額，其餘顯示原始餘額
+ * @param {Object} balance - calculateBalanceFromRows() 回傳物件（需含 name、type、currency、currentBalance）
+ * @returns {string}
+ */
+function formatBalanceLine(balance) {
+  if (balance.type === '信用卡') {
+    return balance.name + '：未繳 ' + formatBalanceAmount(-balance.currentBalance, balance.currency);
+  }
+  return balance.name + '：' + formatBalanceAmount(balance.currentBalance, balance.currency);
+}
+
+/**
+ * 建構全帳戶餘額一覽回覆訊息：分「【資產】」（非信用卡）與「【信用卡】」兩區
+ * @param {Object[]} balances - calculateBalanceFromRows() 回傳物件陣列
+ * @param {string} today - yyyy/MM/dd 格式日期字串
+ * @returns {string}
+ */
+function buildAllBalancesReply(balances, today) {
+  var assets = balances.filter(function(b) { return b.type !== '信用卡'; });
+  var creditCards = balances.filter(function(b) { return b.type === '信用卡'; });
+
+  var reply = '💰 帳戶餘額一覽（' + today + '）';
+  if (assets.length > 0) {
+    reply += '\n【資產】';
+    for (var i = 0; i < assets.length; i++) {
+      reply += '\n' + formatBalanceLine(assets[i]);
+    }
+  }
+  if (creditCards.length > 0) {
+    reply += '\n【信用卡】';
+    for (var j = 0; j < creditCards.length; j++) {
+      reply += '\n' + formatBalanceLine(creditCards[j]);
+    }
+  }
+  reply += '\n共 ' + balances.length + ' 個帳戶';
+  return reply;
+}
+
+/**
  * 處理餘額查詢指令
  * @param {string} replyToken
  * @param {string|null} accountName
@@ -309,12 +349,7 @@ function handleBalanceCommand(replyToken, accountName, ss) {
     }
 
     var today = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy/MM/dd');
-    var allReply = '💰 帳戶餘額一覽（' + today + '）';
-    for (var i = 0; i < balances.length; i++) {
-      allReply += '\n' + balances[i].name + '：' + formatBalanceAmount(balances[i].currentBalance, balances[i].currency);
-    }
-    allReply += '\n共 ' + balances.length + ' 個帳戶';
-    replyToLine(replyToken, allReply);
+    replyToLine(replyToken, buildAllBalancesReply(balances, today));
     return;
   }
 

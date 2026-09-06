@@ -69,8 +69,8 @@ The system SHALL provide a `calculateAccountBalance(accountName, ss)` function t
    
    Amount cells (column I and 初始餘額) MAY be numbers or strings containing thousands separators or currency symbols; the system SHALL parse them and use the absolute value for transaction amounts.
 4. Subtract the amount for 支出 transactions and add the amount for 收入 transactions.
-5. Exclude rows whose category is "繳信用卡" from balance calculations, because credit card statement expenses may already be imported separately and counting the bank debit would double-count the same spending.
-6. Return an object with: name, currency, initialBalance, transactionTotal, currentBalance (initialBalance + transactionTotal), txCount, and initialDate.
+5. Rows with category 繳信用卡 are included like any other 支出; credit-card accounts (type 信用卡) therefore carry a negative balance equal to the unpaid amount.
+6. Return an object with: name, type (帳戶類型, default "銀行"), currency, initialBalance, transactionTotal, currentBalance (initialBalance + transactionTotal), txCount, and initialDate.
 7. Return null if no active account with the given name exists.
 
 The `getAllAccountBalances(ss)` function SHALL compute balances for all active accounts in a single worksheet read, applying the same logic to each account.
@@ -117,10 +117,10 @@ The `getAllAccountBalances(ss)` function SHALL compute balances for all active a
 - **WHEN** a transaction row has 金融機構 "現金", blank 帳戶名稱, 幣別 "TWD", and type 支出
 - **THEN** `calculateAccountBalance("現金")` includes that row in the cash balance calculation
 
-#### Scenario: Credit card payment rows excluded from balance
+#### Scenario: Credit card payment rows included as a normal expense
 
-- **WHEN** a transaction row has category "繳信用卡"
-- **THEN** account balance calculations exclude that row to avoid double-counting with imported credit card statement expenses
+- **WHEN** a transaction row has category "繳信用卡" of 5000 against a 信用卡-type account
+- **THEN** the row is included like any other 支出, decreasing that account's currentBalance by 5000 (a negative currentBalance represents the unpaid amount)
 
 ##### Example: boundary date cases
 

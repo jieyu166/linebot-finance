@@ -207,11 +207,7 @@ function matchAccountRow(account, row) {
  * @returns {string|null} 排除原因代碼
  */
 function excludeReason(account, row) {
-  var rowCategory = String(row[4] || '').trim();
   var rowCurrency = String(row[7] || 'TWD').trim().toUpperCase() || 'TWD';
-  if (rowCategory === '繳信用卡') {
-    return 'credit-card-payment';
-  }
   if (rowCurrency !== String(account.currency || 'TWD').toUpperCase()) {
     return 'currency';
   }
@@ -268,6 +264,7 @@ function calculateBalanceFromRows(account, transactionRows) {
 
   return {
     name: account.name,
+    type: account.type || '銀行',
     currency: account.currency,
     initialBalance: account.initialBalance,
     transactionTotal: transactionTotal,
