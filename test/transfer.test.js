@@ -79,6 +79,32 @@ t('counterpartyAccount 限定', () => {
   assert.strictEqual(result[0].id, 'b2');
 });
 
+t('分類非轉帳／非空白時不視為候選（避免誤配對到無關交易）', () => {
+  const a = accounts();
+  const source = tx({ id: 'a1', account: '中信', type: '支出', amount: 5000, date: '2026/09/01', category: '轉帳' });
+  const candidate = tx({ id: 'b1', account: '玉山', type: '收入', amount: 5000, date: '2026/09/02', category: '薪資' });
+  const result = gs.pickTransferCandidates(source, [source, candidate], a, {});
+  assert.strictEqual(result.length, 0);
+});
+
+t('分類為「轉帳」時仍視為候選', () => {
+  const a = accounts();
+  const source = tx({ id: 'a1', account: '永豐大戶', type: '支出', amount: 1000, date: '2026/09/01', category: '轉帳' });
+  const candidate = tx({ id: 'b1', account: '玉山', type: '收入', amount: 1000, date: '2026/09/02', category: '轉帳' });
+  const result = gs.pickTransferCandidates(source, [source, candidate], a, {});
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].id, 'b1');
+});
+
+t('分類為空白時仍視為候選（相容舊資料）', () => {
+  const a = accounts();
+  const source = tx({ id: 'a1', account: '永豐大戶', type: '支出', amount: 1000, date: '2026/09/01', category: '轉帳' });
+  const candidate = tx({ id: 'b1', account: '玉山', type: '收入', amount: 1000, date: '2026/09/02', category: '' });
+  const result = gs.pickTransferCandidates(source, [source, candidate], a, {});
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].id, 'b1');
+});
+
 t('counterpartyBank 限定', () => {
   const a = accounts();
   const source = tx({ id: 'a1', account: '玉山', type: '支出', amount: 1000, date: '2026/09/01' });
@@ -460,6 +486,31 @@ t('autoPairImportedTransactions：繳卡費／轉帳唯一候選／ATM 提款 �
   assert.strictEqual(created2[8], 5000);
   assert.ok(row4[11]);
   assert.strictEqual(created2[11], row4[11]);
+});
+
+t('autoPairImportedTransactions：全表只讀一次（兩張卡各一筆繳信用卡批次配對，不逐筆重讀整張表）', () => {
+  const acctRows = [
+    accountRowFull('永豐大戶', '永豐銀行', 'TWD', '銀行', '', '198-01'),
+    accountRowFull('永豐信用卡', '永豐銀行', 'TWD', '信用卡', '永豐大戶', ''),
+    accountRowFull('一銀', '第一銀行', 'TWD', '銀行', '', '630'),
+    accountRowFull('一銀信用卡', '第一銀行', 'TWD', '信用卡', '一銀', '')
+  ];
+  const txSheet = fakeSheet([
+    txRowFull('2026/09/01', '永豐銀行', '永豐大戶', '支出', '繳信用卡', '', '永豐卡費', 1000, 'TWD', 't1'),
+    txRowFull('2026/09/01', '第一銀行', '一銀', '支出', '繳信用卡', '', '一銀卡費', 2000, 'TWD', 't2')
+  ]);
+  let bulkReads = 0;
+  const originalGetRange = txSheet.getRange;
+  txSheet.getRange = (r, c, nr, nc) => {
+    if (nr > 1) { bulkReads++; }
+    return originalGetRange(r, c, nr, nc);
+  };
+  const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': acctSheet(acctRows) });
+
+  const result = gs.autoPairImportedTransactions([{ id: 't1' }, { id: 't2' }], ss);
+  assert.strictEqual(result.paired, 2);
+  assert.strictEqual(result.created, 2);
+  assert.strictEqual(bulkReads, 1, '全表讀取（nr>1）應只發生一次，實際 ' + bulkReads + ' 次');
 });
 
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');

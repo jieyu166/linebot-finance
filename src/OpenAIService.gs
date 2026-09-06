@@ -287,18 +287,23 @@ function findAccountByTypeAndBank(accounts, type, bank, currency) {
  * 匯入後處理：帳號分流、信用卡／證券帳單強制對應類型帳戶、同帳戶內轉丟棄
  * @param {Object} parsed - OpenAI 解析結果
  * @param {Object[]} accounts - 帳戶清單
- * @returns {{transactions: Object[], unmatchedAccountNumbers: string[]}}
+ * @returns {{transactions: Object[], unmatchedAccountNumbers: string[], intraAccountSkipped: Object[]}}
  */
 function resolveImportedAccounts(parsed, accounts) {
-  var out = [], unmatched = {}, st = parsed.statementType || '';
+  var out = [], unmatched = {}, skipped = [], st = parsed.statementType || '';
   (parsed.transactions || []).forEach(function(tx) {
     var currency = String(tx.currency || 'TWD').toUpperCase();
     var acct = null;
     if (tx.accountNumber) {
       acct = findAccountByNumber(accounts, tx.accountNumber);
       if (!acct) { unmatched[tx.accountNumber] = true; return; }
-      var cp = matchCounterpartyAccount(tx.description, accounts);
-      if (cp && cp.name === acct.name) { return; } // 同帳戶內轉
+      if (tx.category === '轉帳') {
+        var cp = matchCounterpartyAccount(tx.description, accounts);
+        if (cp && cp.name === acct.name) { // 同帳戶內轉
+          skipped.push({ date: tx.date, item: tx.item, amount: tx.amount });
+          return;
+        }
+      }
     } else {
       acct = findAccountByName(accounts, tx.account);
       if (st === '信用卡' && (!acct || acct.type !== '信用卡' || acct.currency !== currency)) {
@@ -316,7 +321,7 @@ function resolveImportedAccounts(parsed, accounts) {
     }
     out.push(tx);
   });
-  return { transactions: out, unmatchedAccountNumbers: Object.keys(unmatched) };
+  return { transactions: out, unmatchedAccountNumbers: Object.keys(unmatched), intraAccountSkipped: skipped };
 }
 
 /**
@@ -339,11 +344,16 @@ function extractFxCardPayment(parsed, accounts) {
   });
   var usdCard = findAccountByTypeAndBank(accounts, '信用卡', parsed.bank, 'USD');
   var kept = txs.filter(function(tx) { return !isTransit(tx); });
-  kept.forEach(function(tx) {
-    if (tx.category === '繳信用卡' && /換匯/.test((tx.item || '') + (tx.description || '')) && fxTotal > 0) {
-      tx.fxAmount = Math.round(fxTotal * 100) / 100;
-    }
+  var fxCandidates = kept.filter(function(tx) {
+    return tx.category === '繳信用卡' && /換匯/.test((tx.item || '') + (tx.description || '')) && fxTotal > 0;
   });
+  if (fxCandidates.length > 0) {
+    fxCandidates[0].fxAmount = Math.round(fxTotal * 100) / 100;
+    if (fxCandidates.length > 1) {
+      parsed.fxWarnings = parsed.fxWarnings || [];
+      parsed.fxWarnings.push('外幣卡費換匯有 ' + fxCandidates.length + ' 筆，僅第一筆自動配對，其餘請在 App 手動連結');
+    }
+  }
   if (usdCard) {
     rewards.forEach(function(tx) {
       tx.accountNumber = '';
@@ -415,6 +425,7 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts)
   var resolved = resolveImportedAccounts(parsed, accounts || []);
   parsed.transactions = resolved.transactions;
   parsed.unmatchedAccountNumbers = resolved.unmatchedAccountNumbers;
+  parsed.intraAccountSkipped = resolved.intraAccountSkipped;
 
   return parsed;
 }

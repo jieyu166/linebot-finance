@@ -39,6 +39,7 @@ function pickTransferCandidates(tx, allTx, accounts, options) {
   var oppositeType = tx.type === '支出' ? '收入' : '支出';
   return allTx.filter(function(o) {
     if (o.id === tx.id || o.transferId || o.type !== oppositeType) { return false; }
+    if (o.category !== '轉帳' && o.category !== '') { return false; }
     if (normalizeName(o.account) === normalizeName(tx.account)) { return false; }
     var oa = findAccountByName(accounts, o.account);
     if (!oa) { return false; }
@@ -264,15 +265,20 @@ function buildCounterpartRow(tx, target, amount, item) {
 
 /**
  * 新增一筆反向交易列並與來源交易配對
- * @param {Object} tx - 來源交易（需含 rowIndex）
+ * @param {Object} tx - 來源交易（需含 rowIndex）；配對成功後會就地設定 tx.transferId
  * @param {Object} target - 目標帳戶
  * @param {number} amount - 金額
  * @param {string} item - 品項
  * @param {Spreadsheet} ss - 試算表物件
+ * @returns {Object} 新建立的對方交易物件（transferId 已設定）
  */
 function pairWithNewRow(tx, target, amount, item, ss) {
   var created = appendTransactionsBatch([buildCounterpartRow(tx, target, amount, item)], '自動配對', ss)[0];
-  writeTransferCells([tx, created], Utilities.getUuid(), null, ss);
+  var transferId = Utilities.getUuid();
+  writeTransferCells([tx, created], transferId, null, ss);
+  tx.transferId = transferId;
+  created.transferId = transferId;
+  return created;
 }
 
 /**
@@ -285,8 +291,8 @@ function autoPairImportedTransactions(newTxs, ss) {
   ss = getSpreadsheet(ss);
   var accounts = getAccounts(ss);
   var result = { paired: 0, created: 0, details: [] };
+  var all = getTransactionRows(ss).map(function(r, idx) { return rowToTransaction(r, idx + 2); });
   for (var i = 0; i < newTxs.length; i++) {
-    var all = getTransactionRows(ss).map(function(r, idx) { return rowToTransaction(r, idx + 2); });
     var tx = null;
     for (var j = 0; j < all.length; j++) { if (all[j].id === newTxs[i].id) { tx = all[j]; } }
     if (!tx || tx.transferId) { continue; }
@@ -299,22 +305,28 @@ function autoPairImportedTransactions(newTxs, ss) {
         if (!newTxs[i].fxAmount) { result.details.push(label + '：外幣卡費金額不明，請在 App 手動連結'); continue; }
         amt = newTxs[i].fxAmount;
       }
-      pairWithNewRow(tx, card, amt, '卡費入帳', ss); result.created++; result.paired++;
+      all.push(pairWithNewRow(tx, card, amt, '卡費入帳', ss)); result.created++; result.paired++;
       continue;
     }
     if (tx.category !== '轉帳') { continue; }
     var cp = matchCounterpartyAccount(tx.description, accounts);
     var candidates = pickTransferCandidates(tx, all, accounts, { counterpartyAccount: cp ? cp.name : '', counterpartyBank: cp ? '' : parseCounterpartyBank(tx.description) });
-    if (candidates.length === 1) { writeTransferCells([tx, candidates[0]], Utilities.getUuid(), '轉帳', ss); result.paired++; continue; }
+    if (candidates.length === 1) {
+      var transferId = Utilities.getUuid();
+      writeTransferCells([tx, candidates[0]], transferId, '轉帳', ss);
+      tx.transferId = transferId;
+      candidates[0].transferId = transferId;
+      result.paired++; continue;
+    }
     if (candidates.length > 1) { result.details.push(label + '：多個候選，請在 App 手動連結'); continue; }
     if (tx.type !== '支出') { continue; }
     if (isCashWithdrawal(tx)) {
       var cash = accounts.filter(function(a) { return a.type === '現金' && a.currency === tx.currency; })[0];
-      if (cash) { pairWithNewRow(tx, cash, tx.amount, 'ATM 提款', ss); result.created++; result.paired++; }
+      if (cash) { all.push(pairWithNewRow(tx, cash, tx.amount, 'ATM 提款', ss)); result.created++; result.paired++; }
       continue;
     }
     var broker = resolveBrokerageAccount(tx, accounts);
-    if (broker && broker.currency === tx.currency) { pairWithNewRow(tx, broker, tx.amount, '交割戶入帳', ss); result.created++; result.paired++; }
+    if (broker && broker.currency === tx.currency) { all.push(pairWithNewRow(tx, broker, tx.amount, '交割戶入帳', ss)); result.created++; result.paired++; }
   }
   return result;
 }

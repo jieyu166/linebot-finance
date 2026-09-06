@@ -154,6 +154,35 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     assert.ok(!text.includes('自動配對'), text);
   });
 
+  t('buildImportSummary：result.intraAccountSkipped 非空時，於未對應帳號後顯示同帳戶內轉跳過筆數', () => {
+    const resultWithSkipped = Object.assign({}, result, {
+      intraAccountSkipped: [{ date: '2026/08/05', item: '悠遊卡加值', amount: 500 }]
+    });
+    const text = gs2.buildImportSummary(resultWithSkipped, 'PDF', outcome);
+    assert.ok(text.includes('同帳戶內轉已跳過 1 筆'), text);
+    const unmatchedIdx = text.indexOf('未對應帳號');
+    const skippedIdx = text.indexOf('同帳戶內轉已跳過');
+    assert.ok(unmatchedIdx >= 0 && skippedIdx > unmatchedIdx, text);
+  });
+
+  t('buildImportSummary：result.intraAccountSkipped 為空或未提供時不顯示該行', () => {
+    const text = gs2.buildImportSummary(result, 'PDF', outcome);
+    assert.ok(!text.includes('同帳戶內轉已跳過'), text);
+  });
+
+  t('buildImportSummary：result.fxWarnings 非空時逐行顯示 ⚠ 警示', () => {
+    const resultWithFxWarnings = Object.assign({}, result, {
+      fxWarnings: ['外幣卡費換匯有 2 筆，僅第一筆自動配對，其餘請在 App 手動連結']
+    });
+    const text = gs2.buildImportSummary(resultWithFxWarnings, 'PDF', outcome);
+    assert.ok(text.includes('⚠ 外幣卡費換匯有 2 筆，僅第一筆自動配對，其餘請在 App 手動連結'), text);
+  });
+
+  t('buildImportSummary：result.fxWarnings 未提供時不顯示 fx 警示行', () => {
+    const text = gs2.buildImportSummary(result, 'PDF', outcome);
+    assert.ok(!text.includes('外幣卡費換匯'), text);
+  });
+
   // ---- importTransactions（端對端，沿用 gs2） ----
 
   function acctRow(name, institution, type, debitAccount, hints) {

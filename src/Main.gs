@@ -514,6 +514,14 @@ function buildImportSummary(result, source, outcome) {
   if (result.unmatchedAccountNumbers && result.unmatchedAccountNumbers.length > 0) {
     replyText += '  未對應帳號：' + result.unmatchedAccountNumbers.join('、') + '（請在帳戶管理 J 欄填帳號識別）\n';
   }
+  if (result.intraAccountSkipped && result.intraAccountSkipped.length > 0) {
+    replyText += '  同帳戶內轉已跳過 ' + result.intraAccountSkipped.length + ' 筆\n';
+  }
+  if (result.fxWarnings && result.fxWarnings.length > 0) {
+    for (var w = 0; w < result.fxWarnings.length; w++) {
+      replyText += '  ⚠ ' + result.fxWarnings[w] + '\n';
+    }
+  }
 
   return replyText.trim();
 }

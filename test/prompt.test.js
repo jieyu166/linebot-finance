@@ -172,7 +172,7 @@ t('resolveImportedAccounts 證券帳單強制對應證券帳戶', () => {
   assert.strictEqual(r.transactions[0].account, '永豐證券');
 });
 
-t('resolveImportedAccounts 同帳戶內轉丟棄（對方帳號等於本列帳戶）', () => {
+t('resolveImportedAccounts 同帳戶內轉丟棄（對方帳號等於本列帳戶，僅限分類為轉帳）', () => {
   const parsed = {
     bank: '玉山銀行', statementType: '銀行帳戶',
     transactions: [
@@ -183,6 +183,22 @@ t('resolveImportedAccounts 同帳戶內轉丟棄（對方帳號等於本列帳�
   const r = gs.resolveImportedAccounts(parsed, accounts());
   assert.strictEqual(r.transactions.length, 1);
   assert.strictEqual(r.transactions[0].item, '悠遊卡加值');
+  assert.strictEqual(r.intraAccountSkipped.length, 1);
+  assert.strictEqual(r.intraAccountSkipped[0].item, '轉出');
+});
+
+t('resolveImportedAccounts 非轉帳分類即使描述含疑似對方帳號也不丟棄（避免卡號/參考號誤判為同帳戶內轉）', () => {
+  const parsed = {
+    bank: '第一銀行', statementType: '銀行帳戶',
+    transactions: [
+      tx({ accountNumber: '630-01*-**00000-*', account: '一銀', item: '購物', category: '購物',
+        description: '消費 6301234567890123' })
+    ]
+  };
+  const r = gs.resolveImportedAccounts(parsed, accounts());
+  assert.strictEqual(r.transactions.length, 1);
+  assert.strictEqual(r.transactions[0].item, '購物');
+  assert.deepStrictEqual(r.intraAccountSkipped, []);
 });
 
 // ---------- extractFxCardPayment ----------
@@ -223,6 +239,42 @@ t('extractFxCardPayment：沒有過渡戶列時原樣回傳', () => {
   const out = gs.extractFxCardPayment(parsed, accounts());
   assert.strictEqual(out.transactions.length, 1);
   assert.strictEqual(out.transactions[0].fxAmount, undefined);
+  assert.strictEqual(out.fxWarnings, undefined);
+});
+
+t('extractFxCardPayment：兩筆卡費換匯列時僅第一筆得到 fxAmount 並產生 fxWarnings', () => {
+  const parsed = {
+    bank: '永豐銀行', statementType: '銀行帳戶',
+    transactions: [
+      tx({ accountNumber: '198-00*-**00615-*', type: '支出', category: '繳信用卡',
+        item: '卡費', description: '幣倍卡費', amount: 500 }),
+      tx({ type: '支出', category: '繳信用卡',
+        item: '卡費換匯', description: '第一張卡費換匯扣款', amount: 15000, accountNumber: '' }),
+      tx({ type: '支出', category: '繳信用卡', item: '卡費換匯', description: '第二張卡費換匯扣款', amount: 8000, accountNumber: '' })
+    ]
+  };
+  const out = gs.extractFxCardPayment(parsed, accounts());
+  const fxRows = out.transactions.filter(function(t) { return /換匯/.test(t.item + t.description); });
+  assert.strictEqual(fxRows.length, 2);
+  assert.strictEqual(fxRows[0].fxAmount, 500);
+  assert.strictEqual(fxRows[1].fxAmount, undefined);
+  assert.strictEqual(out.fxWarnings.length, 1);
+  assert.ok(/2 筆/.test(out.fxWarnings[0]), out.fxWarnings[0]);
+});
+
+t('extractFxCardPayment：只有一筆卡費換匯列時不產生 fxWarnings', () => {
+  const parsed = {
+    bank: '永豐銀行', statementType: '銀行帳戶',
+    transactions: [
+      tx({ accountNumber: '198-00*-**00615-*', type: '支出', category: '繳信用卡',
+        item: '卡費', description: '幣倍卡費', amount: 500 }),
+      tx({ type: '支出', category: '繳信用卡', item: '卡費換匯', description: '卡費換匯扣款', amount: 15000, accountNumber: '' })
+    ]
+  };
+  const out = gs.extractFxCardPayment(parsed, accounts());
+  const fxRow = out.transactions.filter(function(t) { return /換匯/.test(t.item + t.description); })[0];
+  assert.strictEqual(fxRow.fxAmount, 500);
+  assert.strictEqual(out.fxWarnings, undefined);
 });
 
 // ---------- parsePdfWithOpenAI 串接後處理 ----------
