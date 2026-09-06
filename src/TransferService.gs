@@ -386,37 +386,57 @@ function dedupeAgainstSheet(transactions, ss) {
   return result;
 }
 
+/** 舊資料搬移預設排除分類：這些分類本身就不該搬到信用卡帳戶（轉帳／利息／薪資收入等） */
+var MIGRATION_DEFAULT_EXCLUDE_CATEGORIES = ['繳信用卡', '轉帳', '利息', '回饋', '薪資', '股利', '貸款', '投資', '投資獲利', '兼職', '獎金', '家人給'];
+
+/** 舊資料搬移預設排除的品項/描述關鍵字（連結帳戶轉入轉出、卡費繳款、換匯等非信用卡消費列） */
+var MIGRATION_DEFAULT_EXCLUDE_ITEM_PATTERN = /連結帳戶|利息|回饋|轉帳|換匯|卡費|還本|存入|薪資|股息|ACH|定期買股|交割|提款|現金提/;
+
 /**
- * 將舊資料中誤記在扣款帳戶下的信用卡消費列搬移到信用卡帳戶
+ * 將舊資料中誤記在扣款帳戶下的信用卡消費列搬移到信用卡帳戶。
+ * 為避免誤搬轉帳／繳款／利息等非信用卡消費列，預設會排除
+ * MIGRATION_DEFAULT_EXCLUDE_CATEGORIES 分類與符合 MIGRATION_DEFAULT_EXCLUDE_ITEM_PATTERN
+ * 的品項/描述（可用 options 覆寫），被排除的列計入 result.excluded，不計入 matched/moved
  * @param {string} fromAccount - 目前誤記的帳戶名稱（C 欄）
  * @param {string} toAccount - 應搬移到的信用卡帳戶名稱
  * @param {string} [startDate] - 起始日期（含），未填不限制
  * @param {string} [endDate] - 結束日期（含），未填不限制
  * @param {boolean} [dryRun] - 預設 true，只記錄不寫入；傳 false 才正式搬移
  * @param {Spreadsheet} [ss] - 可選的試算表物件
- * @returns {Object} { matched, moved, rows[] }
+ * @param {Object} [options] - { excludeCategories: string[], excludeItemPattern: RegExp }
+ * @returns {Object} { matched, moved, excluded, rows[] }
  */
-function migrateCreditCardRows(fromAccount, toAccount, startDate, endDate, dryRun, ss) {
+function migrateCreditCardRows(fromAccount, toAccount, startDate, endDate, dryRun, ss, options) {
   if (!toAccount) { throw new Error('請用 previewMigrations() / runMigrations() 執行，或傳入 fromAccount、toAccount 參數'); }
   dryRun = dryRun !== false;
   ss = getSpreadsheet(ss);
+  options = options || {};
+  var excludeCategorySet = {};
+  (options.excludeCategories || MIGRATION_DEFAULT_EXCLUDE_CATEGORIES).forEach(function(c) { excludeCategorySet[c] = true; });
+  var excludeItemPattern = options.excludeItemPattern || MIGRATION_DEFAULT_EXCLUDE_ITEM_PATTERN;
   var target = findAccountByName(getAccounts(ss), toAccount);
   if (!target) { throw new Error('找不到目標帳戶：' + toAccount); }
   var sheet = ss.getSheetByName('交易紀錄');
   var rows = getTransactionRows(ss);
   var start = startDate ? parseSheetDate(startDate) : null, end = endDate ? parseSheetDate(endDate) : null;
-  var result = { matched: 0, moved: 0, rows: [] };
+  var result = { matched: 0, moved: 0, excluded: 0, rows: [] };
   for (var i = 0; i < rows.length; i++) {
     var tx = rowToTransaction(rows[i], i + 2);
     if (normalizeName(tx.account) !== normalizeName(fromAccount)) { continue; }
-    if (tx.category === '繳信用卡' || tx.category === '轉帳' || !IMPORT_SOURCES[tx.source]) { continue; }
+    if (!IMPORT_SOURCES[tx.source]) { continue; }
     var d = parseSheetDate(tx.date);
     if ((start && (!d || d < start)) || (end && (!d || d > end))) { continue; }
+    var text = (tx.item || '') + (tx.description || '');
+    if (excludeCategorySet[tx.category] || excludeItemPattern.test(text)) {
+      result.excluded++;
+      Logger.log('[排除] 第 ' + tx.rowIndex + ' 列 ' + tx.date + ' ' + tx.item + ' ' + tx.amount);
+      continue;
+    }
     result.matched++; result.rows.push(tx.rowIndex);
     Logger.log((dryRun ? '[預覽] ' : '[搬移] ') + '第 ' + tx.rowIndex + ' 列 ' + tx.date + ' ' + tx.item + ' ' + tx.amount);
     if (!dryRun) { sheet.getRange(tx.rowIndex, 2, 1, 2).setValues([[target.institution, target.name]]); result.moved++; }
   }
-  Logger.log('符合 ' + result.matched + ' 筆，已搬移 ' + result.moved + ' 筆' + (dryRun ? '（預覽，未寫入；正式執行傳 dryRun=false）' : ''));
+  Logger.log('符合 ' + result.matched + ' 筆，排除 ' + result.excluded + ' 筆，已搬移 ' + result.moved + ' 筆' + (dryRun ? '（預覽，未寫入；正式執行傳 dryRun=false）' : ''));
   return result;
 }
 

@@ -142,7 +142,9 @@ function initializeSheets() {
 }
 
 /**
- * 補齊帳戶管理工作表的 H/I/J 欄標題與缺少的預設帳戶，不覆蓋既有資料
+ * 補齊帳戶管理工作表的 H/I/J 欄標題與缺少的預設帳戶，不覆蓋既有資料；
+ * 既有帳戶（名稱正規化後對到 DEFAULT_ACCOUNTS）若 H/I/J 欄位空白，
+ * 依對應的預設值補上（只填空白，A–G 與已有值的 H/I/J 一律不動）
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {number} 新增的帳戶筆數
  */
@@ -154,12 +156,34 @@ function upsertDefaultAccounts(ss) {
   }
   var lastRow = sheet.getLastRow();
   var existing = {};
+  var defaultByName = {};
+  DEFAULT_ACCOUNTS.forEach(function(row) { defaultByName[normalizeName(row[0])] = row; });
+  var filledCount = 0;
   if (lastRow >= 2) {
-    sheet.getRange(2, 1, lastRow - 1, 1).getValues().forEach(function(row) { existing[normalizeName(row[0])] = true; });
+    var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    var hijRange = sheet.getRange(2, 8, lastRow - 1, 3);
+    var hijValues = hijRange.getValues();
+    var changed = false;
+    names.forEach(function(row, i) {
+      var key = normalizeName(row[0]);
+      existing[key] = true;
+      var def = defaultByName[key];
+      if (!def) { return; }
+      var rowChanged = false;
+      for (var c = 0; c < 3; c++) {
+        if (String(hijValues[i][c] || '').trim() === '') {
+          hijValues[i][c] = def[7 + c];
+          rowChanged = true;
+        }
+      }
+      if (rowChanged) { changed = true; filledCount++; }
+    });
+    if (changed) { hijRange.setValues(hijValues); }
   }
   var missing = DEFAULT_ACCOUNTS.filter(function(row) { return !existing[normalizeName(row[0])]; });
   if (missing.length > 0) { sheet.getRange(lastRow + 1, 1, missing.length, ACCOUNT_HEADERS.length).setValues(missing); }
   Logger.log('帳戶管理新增 ' + missing.length + ' 筆');
+  if (filledCount > 0) { Logger.log('補齊 ' + filledCount + ' 個既有帳戶的空白欄位'); }
   return missing.length;
 }
 
@@ -190,7 +214,11 @@ function backfillTransactionIds(ss) {
 var MIGRATIONS = [
   { name: '一銀',   from: '一銀',     to: '一銀信用卡',   start: '', end: '' },
   { name: '國泰',   from: '國泰',     to: '國泰信用卡',   start: '', end: '' },
-  { name: '永豐',   from: '永豐大戶', to: '永豐信用卡',   start: '2026/01/01', end: '2026/12/31' }  // 依實際信用卡消費區間調整
+  // 永豐大戶 → 永豐信用卡：不限日期區間也安全，因為 migrateCreditCardRows 預設會排除
+  // 繳信用卡／轉帳／利息／回饋／薪資／股利／貸款／投資／投資獲利／兼職／獎金／家人給
+  // 分類，以及品項/描述含「連結帳戶、利息、回饋、轉帳、換匯、卡費、還本、存入、薪資、
+  // 股息、ACH、定期買股、交割、提款、現金提」的列，只會搬移真正的信用卡消費商戶列
+  { name: '永豐',   from: '永豐大戶', to: '永豐信用卡',   start: '', end: '' }
 ];
 
 /**
@@ -218,6 +246,39 @@ function runMigrations(ss) {
   MIGRATIONS.forEach(function(m) {
     var r = migrateCreditCardRows(m.from, m.to, m.start, m.end, false, ss);
     Logger.log('【' + m.name + '】已搬移 ' + r.moved + ' 筆');
+    results.push({ name: m.name, matched: r.matched, moved: r.moved });
+  });
+  return results;
+}
+
+/** undoMigrations／previewUndoMigrations 還原時的排除設定：只排除繳信用卡／轉帳分類與「卡費入帳」列，其餘信用卡消費列一律搬回原扣款帳戶 */
+var UNDO_MIGRATION_OPTIONS = { excludeCategories: ['繳信用卡', '轉帳'], excludeItemPattern: /卡費入帳/ };
+
+/**
+ * 依 MIGRATIONS 逐一預覽還原（不寫入）：把信用卡帳戶上已搬移的消費列搬回原扣款帳戶，可直接在編輯器點選執行
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Array<Object>} 每筆設定的 { name, matched, moved }
+ */
+function previewUndoMigrations(ss) {
+  var results = [];
+  MIGRATIONS.forEach(function(m) {
+    var r = migrateCreditCardRows(m.to, m.from, m.start, m.end, true, ss, UNDO_MIGRATION_OPTIONS);
+    Logger.log('【' + m.name + '】符合 ' + r.matched + ' 筆（預覽還原）');
+    results.push({ name: m.name, matched: r.matched, moved: r.moved });
+  });
+  return results;
+}
+
+/**
+ * 依 MIGRATIONS 逐一正式還原：若 runMigrations() 搬移結果不對，把信用卡帳戶上的消費列搬回原扣款帳戶，可直接在編輯器點選執行
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Array<Object>} 每筆設定的 { name, matched, moved }
+ */
+function undoMigrations(ss) {
+  var results = [];
+  MIGRATIONS.forEach(function(m) {
+    var r = migrateCreditCardRows(m.to, m.from, m.start, m.end, false, ss, UNDO_MIGRATION_OPTIONS);
+    Logger.log('【' + m.name + '】已還原 ' + r.moved + ' 筆');
     results.push({ name: m.name, matched: r.matched, moved: r.moved });
   });
   return results;

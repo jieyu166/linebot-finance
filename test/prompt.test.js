@@ -152,7 +152,7 @@ t('resolveImportedAccounts 依 accountNumber 分流到正確帳戶', () => {
   assert.deepStrictEqual(r.unmatchedAccountNumbers, []);
 });
 
-t('resolveImportedAccounts 對應不到的 accountNumber 丟棄並記錄', () => {
+t('resolveImportedAccounts 帳號無 hint 命中時，銀行帳戶依「銀行＋幣別」fallback 唯一對應並記錄 fallbackAccountNumbers', () => {
   const parsed = {
     bank: '永豐銀行', statementType: '銀行帳戶',
     transactions: [
@@ -161,9 +161,54 @@ t('resolveImportedAccounts 對應不到的 accountNumber 丟棄並記錄', () =>
     ]
   };
   const r = gs.resolveImportedAccounts(parsed, accounts());
+  assert.strictEqual(r.transactions.length, 2);
+  assert.deepStrictEqual(r.transactions.map(x => x.account), ['永豐大戶', '永豐大戶']);
+  assert.deepStrictEqual(r.unmatchedAccountNumbers, []);
+  assert.deepStrictEqual(r.fallbackAccountNumbers, ['198-00*-**10443-*']);
+});
+
+t('resolveImportedAccounts 帳號無 hint 命中，且該銀行沒有任何「銀行」類型帳戶時仍丟棄並記錄 unmatchedAccountNumbers', () => {
+  const parsed = {
+    bank: '玉山銀行', statementType: '銀行帳戶',
+    transactions: [tx({ accountNumber: '999-99*-**99999-*', item: '未知款' })]
+  };
+  const r = gs.resolveImportedAccounts(parsed, [
+    { name: '玉山信用卡', institution: '玉山銀行', currency: 'TWD', type: '信用卡', accountNumberHints: [] }
+  ]);
+  assert.strictEqual(r.transactions.length, 0);
+  assert.deepStrictEqual(r.unmatchedAccountNumbers, ['999-99*-**99999-*']);
+  assert.deepStrictEqual(r.fallbackAccountNumbers, []);
+});
+
+t('resolveImportedAccounts 帳號無 hint 命中，同銀行有兩個皆無 hint 的「銀行」帳戶時 fallback 無法唯一判定，維持丟棄（同舊行為）', () => {
+  const parsed = {
+    bank: '玉山銀行', statementType: '銀行帳戶',
+    transactions: [tx({ accountNumber: '0381979***481', item: '轉入' })]
+  };
+  const ambiguousAccounts = [
+    { name: '玉山A', institution: '玉山銀行', currency: 'TWD', type: '銀行', accountNumberHints: [] },
+    { name: '玉山B', institution: '玉山銀行', currency: 'TWD', type: '銀行', accountNumberHints: [] }
+  ];
+  const r = gs.resolveImportedAccounts(parsed, ambiguousAccounts);
+  assert.strictEqual(r.transactions.length, 0);
+  assert.deepStrictEqual(r.unmatchedAccountNumbers, ['0381979***481']);
+  assert.deepStrictEqual(r.fallbackAccountNumbers, []);
+});
+
+t('resolveImportedAccounts 帳號無 hint 命中，唯一的「銀行」帳戶也沒有 hint 時仍 fallback 對應並記錄帳號（例：玉山無 hint、僅玉山信用卡另一帳戶）', () => {
+  const parsed = {
+    bank: '玉山銀行', statementType: '銀行帳戶',
+    transactions: [tx({ accountNumber: '0381979***481', item: '轉入' })]
+  };
+  const noHintAccounts = [
+    { name: '玉山', institution: '玉山銀行', currency: 'TWD', type: '銀行', accountNumberHints: [] },
+    { name: '玉山信用卡', institution: '玉山銀行', currency: 'TWD', type: '信用卡', accountNumberHints: [], debitAccount: '玉山' }
+  ];
+  const r = gs.resolveImportedAccounts(parsed, noHintAccounts);
   assert.strictEqual(r.transactions.length, 1);
-  assert.strictEqual(r.transactions[0].account, '永豐大戶');
-  assert.deepStrictEqual(r.unmatchedAccountNumbers, ['198-00*-**10443-*']);
+  assert.strictEqual(r.transactions[0].account, '玉山');
+  assert.deepStrictEqual(r.unmatchedAccountNumbers, []);
+  assert.deepStrictEqual(r.fallbackAccountNumbers, ['0381979***481']);
 });
 
 t('resolveImportedAccounts 信用卡帳單強制對應信用卡帳戶並依幣別分流', () => {
@@ -304,7 +349,7 @@ t('extractFxCardPayment：只有一筆卡費換匯列時不產生 fxWarnings', (
 
 // ---------- parsePdfWithOpenAI 串接後處理 ----------
 
-t('parsePdfWithOpenAI 回傳經過帳號分流的交易與 unmatchedAccountNumbers', () => {
+t('parsePdfWithOpenAI 回傳經過帳號分流的交易，帳號無 hint 命中但銀行唯一可判定時 fallback 分流而非丟棄', () => {
   fakeResponseBody = JSON.stringify({
     bank: '永豐銀行', statementType: '銀行帳戶', skipped: 3,
     transactions: [
@@ -315,9 +360,25 @@ t('parsePdfWithOpenAI 回傳經過帳號分流的交易與 unmatchedAccountNumbe
     ]
   });
   const r = gs.parsePdfWithOpenAI('帳單文字', EXP, INC, accounts());
-  assert.strictEqual(r.transactions.length, 1);
-  assert.strictEqual(r.transactions[0].account, '永豐大戶');
+  assert.strictEqual(r.transactions.length, 2);
+  assert.deepStrictEqual(r.transactions.map(x => x.account), ['永豐大戶', '永豐大戶']);
   assert.strictEqual(r.transactions[0].amount, 607);
+  assert.deepStrictEqual(r.unmatchedAccountNumbers, []);
+  assert.deepStrictEqual(r.fallbackAccountNumbers, ['999-99*-**99999-*']);
+});
+
+t('parsePdfWithOpenAI 帳號無 hint 命中且該銀行無唯一「銀行」帳戶可判定時，維持丟棄並記錄 unmatchedAccountNumbers', () => {
+  fakeResponseBody = JSON.stringify({
+    bank: '玉山銀行', statementType: '銀行帳戶', skipped: 0,
+    transactions: [
+      { date: '2026/08/02', type: '支出', category: '轉帳', item: '轉出', description: '轉出',
+        institution: '', account: '', currency: 'TWD', amount: '1000', accountNumber: '999-99*-**99999-*' }
+    ]
+  });
+  const r = gs.parsePdfWithOpenAI('帳單文字', EXP, INC, [
+    { name: '玉山信用卡', institution: '玉山銀行', currency: 'TWD', type: '信用卡', initialBalance: 0, initialDate: '', note: '', active: true, debitAccount: '', accountNumberHints: [] }
+  ]);
+  assert.strictEqual(r.transactions.length, 0);
   assert.deepStrictEqual(r.unmatchedAccountNumbers, ['999-99*-**99999-*']);
 });
 
