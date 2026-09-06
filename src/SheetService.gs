@@ -259,8 +259,46 @@ function calculateBalanceFromRows(account, transactionRows) {
   };
 }
 
+var TX_COLUMN_COUNT = 12;
+
 /**
- * 讀取交易紀錄 A-I 欄資料
+ * 將交易紀錄列資料轉為交易物件
+ * @param {Array} row - 交易紀錄列資料 A-L
+ * @param {number} rowIndex - 試算表列號
+ * @returns {Object}
+ */
+function rowToTransaction(row, rowIndex) {
+  return {
+    date: normalizeDateString(row[0]),
+    institution: String(row[1] || '').trim(),
+    account: String(row[2] || '').trim(),
+    type: String(row[3] || '').trim(),
+    category: String(row[4] || '').trim(),
+    item: String(row[5] || '').trim(),
+    description: String(row[6] || '').trim(),
+    currency: String(row[7] || 'TWD').trim().toUpperCase() || 'TWD',
+    amount: Math.abs(parseAmount(row[8])),
+    source: String(row[9] || '').trim(),
+    id: String(row[10] || '').trim(),
+    transferId: String(row[11] || '').trim(),
+    rowIndex: rowIndex
+  };
+}
+
+/**
+ * 將交易物件轉為交易紀錄列資料（12 欄），id 空時自動產生 UUID
+ * @param {Object} tx - 交易物件
+ * @returns {Array} 12 元素陣列
+ */
+function transactionToRow(tx) {
+  var institution = tx.institution || '現金';
+  var account = tx.account || (institution === '現金' ? '現金' : '');
+  return [tx.date, institution, account, tx.type, tx.category, tx.item || '', tx.description || '',
+    tx.currency || 'TWD', Math.abs(parseAmount(tx.amount)), tx.source || '', tx.id || Utilities.getUuid(), tx.transferId || ''];
+}
+
+/**
+ * 讀取交易紀錄 A-L 欄資料
  * @param {Spreadsheet} ss - 試算表物件
  * @returns {Array[]}
  */
@@ -274,7 +312,7 @@ function getTransactionRows(ss) {
   if (lastRow < 2) {
     return [];
   }
-  return sheet.getRange(2, 1, lastRow - 1, 9).getValues();
+  return sheet.getRange(2, 1, lastRow - 1, TX_COLUMN_COUNT).getValues();
 }
 
 /**
@@ -364,46 +402,37 @@ function debugAccountBalance(accountName) {
  * @param {number} amount - 金額
  * @param {string} originalMessage - 原始訊息
  * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} 交易物件（含 id、rowIndex）
  */
 function appendTransaction(date, institution, account, type, category, item, description, currency, amount, originalMessage, ss) {
-  ss = getSpreadsheet(ss);
-  var sheet = ss.getSheetByName('交易紀錄');
-  institution = institution || '現金';
-  account = account || (institution === '現金' ? '現金' : '');
-  sheet.appendRow([date, institution, account, type, category, item, description, currency, amount, originalMessage]);
+  return appendTransactionsBatch([{ date: date, institution: institution, account: account, type: type, category: category,
+    item: item, description: description, currency: currency, amount: amount }], originalMessage, ss)[0];
 }
 
 /**
  * 批次寫入多筆交易紀錄
  * @param {Object[]} transactions - 交易陣列
- * @param {string} [source] - 來源標記（'PDF匯入' 或 '文字匯入'）
+ * @param {string} [source] - 來源標記（'PDF匯入' 或 '文字匯入'）；tx.source 有值時優先
  * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object[]} 交易物件陣列（含 id、rowIndex）
  */
 function appendTransactionsBatch(transactions, source, ss) {
-  if (transactions.length === 0) {
-    return;
-  }
-
+  if (!transactions || transactions.length === 0) { return []; }
   ss = getSpreadsheet(ss);
   var sheet = ss.getSheetByName('交易紀錄');
-  var lastRow = sheet.getLastRow();
-
-  var rows = transactions.map(function(tx) {
-    var institution = tx.institution || '現金';
-    var account = tx.account || (institution === '現金' ? '現金' : '');
-    return [
-      tx.date,
-      institution,
-      account,
-      tx.type,
-      tx.category,
-      tx.item,
-      tx.description || '',
-      tx.currency || 'TWD',
-      tx.amount,
-      source || 'PDF匯入'
-    ];
-  });
-
-  sheet.getRange(lastRow + 1, 1, rows.length, 10).setValues(rows);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var lastRow = sheet.getLastRow();
+    var rows = transactions.map(function(tx) {
+      var copy = {};
+      for (var k in tx) { copy[k] = tx[k]; }
+      copy.source = tx.source || source || 'PDF匯入';
+      return transactionToRow(copy);
+    });
+    sheet.getRange(lastRow + 1, 1, rows.length, TX_COLUMN_COUNT).setValues(rows);
+    return rows.map(function(row, i) { return rowToTransaction(row, lastRow + 1 + i); });
+  } finally {
+    lock.releaseLock();
+  }
 }

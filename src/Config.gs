@@ -37,8 +37,10 @@ function initializeSheets() {
   var txSheet = ss.getSheetByName('交易紀錄');
   if (!txSheet) {
     txSheet = ss.insertSheet('交易紀錄');
-    txSheet.getRange('A1:J1').setValues([['日期', '金融機構', '帳戶名稱', '類型', '分類', '品項', '明細描述', '幣別', '金額', '原始訊息']]);
+    txSheet.getRange('A1:L1').setValues([['日期', '金融機構', '帳戶名稱', '類型', '分類', '品項', '明細描述', '幣別', '金額', '原始訊息', 'ID', '轉帳ID']]);
     txSheet.setFrozenRows(1);
+  } else if (txSheet.getRange('K1').getValue() !== 'ID') {
+    txSheet.getRange('K1:L1').setValues([['ID', '轉帳ID']]);
   }
 
   // 建立「支出分類」工作表
@@ -95,4 +97,25 @@ function initializeSheets() {
   }
 
   Logger.log('試算表結構已初始化');
+}
+
+/**
+ * 為交易紀錄中缺少 ID 的既有列補上 UUID
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {number} 補上的筆數
+ */
+function backfillTransactionIds(ss) {
+  ss = getSpreadsheet(ss);
+  var sheet = ss.getSheetByName('交易紀錄');
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) { return 0; }
+  var range = sheet.getRange(2, 11, lastRow - 1, 1);
+  var values = range.getValues();
+  var count = 0;
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === '') { values[i][0] = Utilities.getUuid(); count++; }
+  }
+  if (count > 0) { range.setValues(values); }
+  Logger.log('已補 ' + count + ' 筆交易 ID');
+  return count;
 }

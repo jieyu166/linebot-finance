@@ -8,7 +8,7 @@ function acct(over) {
 }
 // 交易列 A-I: 日期, 機構, 帳戶, 類型, 分類, 品項, 明細, 幣別, 金額
 function row(date, inst, account, type, cat, amount, currency) {
-  return [date, inst, account, type, cat, '', '', currency || 'TWD', amount];
+  return [date, inst, account, type, cat, '', '', currency || 'TWD', amount, '', '', ''];
 }
 
 let failed = 0;
