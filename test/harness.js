@@ -17,7 +17,12 @@ const Utilities = {
 const Logger = { log: function(m) { console.log('[Logger]', m); } };
 
 function loadGs(files, extraGlobals) {
-  const ctx = Object.assign({ Utilities, Logger, console, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
+  let uuidCounter = 0;
+  const utilities = Object.assign({}, Utilities, {
+    getUuid: function() { uuidCounter++; return 'uuid-' + String(uuidCounter).padStart(4, '0'); }
+  });
+  const LockService = { getScriptLock: () => ({ waitLock() {}, releaseLock() {}, tryLock() { return true; } }) };
+  const ctx = Object.assign({ Utilities: utilities, Logger, LockService, console, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
   vm.createContext(ctx);
   files.forEach(f => vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'), ctx, { filename: f }));
   return ctx;
