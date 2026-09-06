@@ -43,6 +43,19 @@ t('upsertDefaultAccounts 補標題與缺少帳戶，不覆蓋既有', () => {
   assert.strictEqual(gs.upsertDefaultAccounts(ss(sheet)), 20);
   assert.strictEqual(sheet._data[0][7], '帳戶類型'); assert.strictEqual(sheet._data[1][3], 1000);
 });
+t('upsertDefaultAccounts 補齊既有帳戶空白的 H/I/J，已填值的欄位不覆寫，A-G 不動', () => {
+  const sheet = accountSheet([
+    ['玉山','玉山銀行','TWD',5000,'2026/01/01','',true,'','',''],
+    ['樂天','樂天銀行','TWD',0,'','',true,'信用卡','','']
+  ]);
+  gs.upsertDefaultAccounts(ss(sheet));
+  const yushanRow = sheet._data[1];
+  assert.strictEqual(yushanRow[0], '玉山'); assert.strictEqual(yushanRow[3], 5000); // A-G 不動
+  assert.strictEqual(yushanRow[7], '銀行');
+  assert.strictEqual(yushanRow[9], '0015977,0381979');
+  const rakutenRow = sheet._data[2];
+  assert.strictEqual(rakutenRow[7], '信用卡'); // 已有值（即使跟預設不同）也不覆寫
+});
 t('findAccountByName 正規化', () => {
   assert.strictEqual(gs.findAccountByName([{ name: 'LineBank' }], 'LINE Bank').name, 'LineBank');
   assert.strictEqual(gs.findAccountByName([{ name: 'LineBank' }], 'x'), null);
