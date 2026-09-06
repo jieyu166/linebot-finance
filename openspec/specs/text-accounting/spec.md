@@ -80,27 +80,52 @@ The function `parseWithOpenAI(message, expenseCategories, incomeCategories, acco
 ---
 ### Requirement: Write transaction to Google Sheets
 
-The system SHALL append a new row to the "交易紀錄" worksheet with columns: date (yyyy/MM/dd in Asia/Taipei timezone), time (HH:mm), type, category, item, amount, and original message text. The date and time SHALL reflect the moment of processing, not a date mentioned in the message.
+The system SHALL append a new row to the "交易紀錄" worksheet via `appendTransaction()`, which writes all 12 columns (A–L): 日期 (yyyy/MM/dd in Asia/Taipei timezone, the moment of processing rather than any date mentioned in the message), 金融機構, 帳戶名稱, 類型, 分類, 品項, 明細描述, 幣別, 金額, 原始訊息 (the user's raw message text), K 欄 ID (a freshly generated `Utilities.getUuid()`), and L 欄 轉帳ID (left blank at write time).
 
 #### Scenario: Successful write
 
-- **WHEN** OpenAI successfully parses a message into type "支出", category "飲食", item "午餐便當", amount 80
-- **THEN** the system appends a row `[2026/04/08, 14:30, 支出, 飲食, 午餐便當, 80, 午餐便當80]` to the "交易紀錄" worksheet
+- **WHEN** OpenAI successfully parses "午餐便當80" into type "支出", category "飲食", item "午餐便當", amount 80, institution "現金", account "現金", currency "TWD"
+- **THEN** the system appends a 12-column row `[2026/04/08, 現金, 現金, 支出, 飲食, 午餐便當, 午餐便當80, TWD, 80, 午餐便當80, <generated UUID>, '']` to the "交易紀錄" worksheet
 
 ---
 ### Requirement: Reply confirmation via LINE
 
-The system SHALL reply to the user via LINE Reply API with a confirmation message containing the parsed type, category, item, and amount. Expense messages SHALL use the 💸 emoji prefix. Income messages SHALL use the 💰 emoji prefix.
+The system SHALL reply to the user via LINE Reply API with a confirmation message containing the parsed type, category, item, and amount (with currency), plus an 機構 line when 機構 is set and not "現金". Expense messages SHALL use the 💸 emoji prefix. Income messages SHALL use the 💰 emoji prefix.
 
 #### Scenario: Expense confirmation reply
 
-- **WHEN** a text message is successfully parsed and written as an expense
-- **THEN** the system replies: "💸 記帳成功！\n類型：支出\n分類：飲食\n品項：午餐便當\n金額：80 元"
+- **WHEN** a text message is successfully parsed and written as an expense with amount 80 TWD, no non-cash institution
+- **THEN** the system replies: "💸 記帳成功！\n類型：支出\n分類：飲食\n品項：午餐便當\n金額：80 TWD"
 
 #### Scenario: Income confirmation reply
 
-- **WHEN** a text message is successfully parsed and written as income
-- **THEN** the system replies: "💰 記帳成功！\n類型：收入\n分類：薪資\n品項：薪水\n金額：50000 元"
+- **WHEN** a text message is successfully parsed and written as income with amount 50000 TWD
+- **THEN** the system replies: "💰 記帳成功！\n類型：收入\n分類：薪資\n品項：薪水\n金額：50000 TWD"
+
+#### Scenario: Institution line appended for non-cash accounts
+
+- **WHEN** a text message resolves to institution "玉山銀行" (account "玉山信用卡")
+- **THEN** the confirmation reply gains a trailing line "機構：玉山銀行"
+
+---
+### Requirement: Single-entry auto-pair for 繳信用卡 and 轉帳 categories
+
+After writing a single text-accounting entry, if the parsed `category` is "繳信用卡" or "轉帳", the system SHALL call `tryAutoPair([written], ss)`, which wraps `autoPairImportedTransactions()` (see transfer-pairing) in a try/catch. When the pairing call succeeds and pairs at least one transaction (`pairing.paired > 0`), the confirmation reply SHALL gain a trailing line "已自動配對對方帳戶". When pairing fails (throws) or finds nothing to pair, `tryAutoPair` SHALL swallow the error (logging it), return `{ paired: 0, created: 0, details: [] }`, and the entry SHALL still be reported as successfully recorded — a pairing failure never turns a successful accounting entry into a failure reply.
+
+#### Scenario: 繳信用卡 entry auto-pairs and reply notes it
+
+- **WHEN** the user texts a message that OpenAI classifies as 支出／繳信用卡 against a bank account, and exactly one credit-card account can be resolved via `resolveCreditCardAccount`
+- **THEN** the entry is written, a counterpart 收入／轉帳 "卡費入帳" row is created on the resolved credit-card account sharing a new 轉帳ID, and the reply gains the line "已自動配對對方帳戶"
+
+#### Scenario: Pairing failure does not fail the accounting entry
+
+- **WHEN** `autoPairImportedTransactions` throws an exception while attempting to pair a 轉帳-category entry (e.g. a spreadsheet access error)
+- **THEN** `tryAutoPair` catches the exception, logs it, and the user still receives the normal "記帳成功！" confirmation reply without the "已自動配對對方帳戶" line
+
+#### Scenario: No auto-pair line when nothing is paired
+
+- **WHEN** the entry's category is "轉帳" but no counterpart candidate exists yet (e.g. the other side of the transfer has not been imported)
+- **THEN** the reply is the normal confirmation message without an "已自動配對對方帳戶" line
 
 ---
 ### Requirement: Handle parsing failures

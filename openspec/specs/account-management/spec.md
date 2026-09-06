@@ -8,50 +8,75 @@
 
 ### Requirement: Initialize account management worksheet
 
-The system SHALL create a worksheet named "帳戶管理" when `initializeSheets()` is executed, if the worksheet does not already exist. The worksheet SHALL have the following 7 columns in row 1: 帳戶名稱, 金融機構, 幣別, 初始餘額, 初始日期, 備註, 是否啟用. The system SHALL pre-populate 13 default accounts with 是否啟用 set to TRUE and 初始餘額 and 初始日期 left empty for the user to fill in.
+The system SHALL create a worksheet named "帳戶管理" when `initializeSheets()` is executed, if the worksheet does not already exist. The worksheet SHALL have the following 10 columns in row 1 (`ACCOUNT_HEADERS`): A 帳戶名稱, B 金融機構, C 幣別, D 初始餘額, E 初始日期, F 備註, G 是否啟用, H 帳戶類型, I 扣款帳戶, J 帳號識別. The system SHALL pre-populate 21 default accounts (`DEFAULT_ACCOUNTS`) with G 是否啟用 set to TRUE and D 初始餘額／E 初始日期 left empty for the user to fill in.
 
-The 13 default accounts SHALL be:
+H 帳戶類型 SHALL be one of `現金`／`銀行`／`信用卡`／`證券`. I 扣款帳戶 SHALL, for a 信用卡 account, name the bank account it is auto-debited from, and for a 證券 account, name its usual settlement-source bank account; auto-pairing (see transfer-pairing, credit-card-accounts) prefers this column when resolving counterpart accounts. J 帳號識別 SHALL hold the account-number fragment(s) visible on statements for this account (comma/顿號-separated when a bank exposes multiple sub-accounts, e.g. 玉山 `0015977,0381979`), used to route transactions from a multi-account statement to the correct row.
 
-| 帳戶名稱 | 金融機構 | 幣別 |
-|---------|---------|------|
-| 現金 | 現金 | TWD |
-| 一銀 | 第一銀行 | TWD |
-| LineBank | LINE Bank | TWD |
-| 王道 | 王道銀行 | TWD |
-| 永豐大戶 | 永豐銀行 | TWD |
-| 永豐證券 | 永豐證券 | TWD |
-| 永豐外幣 | 永豐銀行 | USD |
-| 玉山 | 玉山銀行 | TWD |
-| 台新 | 台新銀行 | TWD |
-| 中信 | 中國信託 | TWD |
-| 富邦 | 富邦銀行 | TWD |
-| 國泰 | 國泰銀行 | TWD |
-| 樂天 | 樂天銀行 | TWD |
+The 21 default accounts SHALL be:
+
+| 帳戶名稱 | 金融機構 | 幣別 | 類型 | 扣款帳戶 | 帳號識別 | 備註 |
+|---|---|---|---|---|---|---|
+| 現金 | 現金 | TWD | 現金 | | | |
+| 一銀 | 第一銀行 | TWD | 銀行 | | 630 | |
+| 一銀信用卡 | 第一銀行 | TWD | 信用卡 | 一銀 | | 綠活卡＋iLEO 同一帳單 |
+| LineBank | LINE Bank | TWD | 銀行 | | | 簽帳卡走銀行明細 |
+| 王道 | 王道銀行 | TWD | 銀行 | | | 簽帳卡走銀行明細 |
+| 永豐大戶 | 永豐銀行 | TWD | 銀行 | | 198-01 | |
+| 永豐信用卡 | 永豐銀行 | TWD | 信用卡 | 永豐大戶 | | 大戶卡＋幣倍卡＋大衛卡 同一帳單 |
+| 永豐信用卡外幣 | 永豐銀行 | USD | 信用卡 | 永豐大戶 | | 雙幣卡美元帳單 |
+| 永豐證券 | 永豐銀行 | TWD | 證券 | 永豐大戶 | 042-01 | 交割戶 |
+| 永豐外幣 | 永豐銀行 | USD | 銀行 | | 042-00 | |
+| 玉山 | 玉山銀行 | TWD | 銀行 | | 0015977,0381979 | |
+| 玉山信用卡 | 玉山銀行 | TWD | 信用卡 | 玉山 | | UBear 卡 |
+| 台新 | 台新銀行 | TWD | 銀行 | | 288810,288815,288818 | Richart |
+| 台新信用卡 | 台新銀行 | TWD | 信用卡 | 台新 | | Richart 卡 |
+| 中信 | 中國信託 | TWD | 銀行 | | | 網頁複製文字匯入 |
+| 中信信用卡 | 中國信託 | TWD | 信用卡 | 中信 | | 中信 Line 卡 |
+| 富邦 | 富邦銀行 | TWD | 銀行 | | | |
+| 富邦信用卡 | 富邦銀行 | TWD | 信用卡 | 富邦 | | Costco 卡 |
+| 國泰 | 國泰銀行 | TWD | 銀行 | | | |
+| 國泰信用卡 | 國泰銀行 | TWD | 信用卡 | 國泰 | | Cube 卡 |
+| 樂天 | 樂天銀行 | TWD | 銀行 | | | |
 
 #### Scenario: First-time initialization creates worksheet
 
 - **WHEN** `initializeSheets()` is called and no "帳戶管理" worksheet exists
-- **THEN** the system creates the worksheet, writes the 7-column header in row 1, freezes row 1, and populates 13 default account rows starting at row 2
+- **THEN** the system creates the worksheet, writes the 10-column header in row 1, freezes row 1, and populates 21 default account rows starting at row 2
 
-#### Scenario: Re-initialization is idempotent
+#### Scenario: Re-initialization only tops up missing headers and accounts
 
 - **WHEN** `initializeSheets()` is called and the "帳戶管理" worksheet already exists
-- **THEN** the system leaves the worksheet unchanged
+- **THEN** the system calls `upsertDefaultAccounts()`, which leaves existing rows' 初始餘額／初始日期 untouched, adds the H/I/J 欄 header only if H1 is not already "帳戶類型", and appends any of the 21 default accounts (matched by normalized name) that are missing — it never overwrites existing account rows
+
+#### Scenario: upsertDefaultAccounts is idempotent
+
+- **WHEN** `upsertDefaultAccounts(ss)` is called twice in a row on the same spreadsheet
+- **THEN** the second call finds all 21 default accounts already present (by normalized name) and appends 0 rows
 
 ---
 ### Requirement: Read active account list
 
-The system SHALL provide a `getAccounts(ss)` function that reads all rows from the "帳戶管理" worksheet and returns an array of account objects. Each object SHALL contain: name (帳戶名稱), institution (金融機構), currency (幣別, default "TWD"), initialBalance (初始餘額 as number, default 0), initialDate (初始日期 as string "yyyy/MM/dd" or empty), note (備註), and active (是否啟用 as boolean). Only accounts with 是否啟用 equal to TRUE SHALL be returned.
+The system SHALL provide a `getAccounts(ss)` function that reads all rows (A–J, 10 columns) from the "帳戶管理" worksheet and returns an array of account objects. Each object SHALL contain: name (帳戶名稱), institution (金融機構), currency (幣別, default "TWD"), initialBalance (初始餘額 as number, default 0), initialDate (初始日期 as string "yyyy/MM/dd" or empty), note (備註), active (是否啟用 as boolean), type (帳戶類型, H 欄; when blank, defaults to "現金" if the name contains "現金" else "銀行"), debitAccount (扣款帳戶, I 欄, trimmed string), and accountNumberHints (帳號識別, J 欄, split on `,`／`，`／`、` into a trimmed, non-empty string array). Only accounts with 是否啟用 equal to TRUE SHALL be returned. Each returned account also carries `institutionUnique` (true when it is the only active account sharing its normalized 機構＋幣別 combination), used by legacy institution-based row matching.
 
 #### Scenario: Returns only active accounts
 
-- **WHEN** the "帳戶管理" worksheet contains 13 rows of which 2 have 是否啟用 = FALSE
-- **THEN** `getAccounts()` returns an array of 11 account objects
+- **WHEN** the "帳戶管理" worksheet contains 21 rows of which 2 have 是否啟用 = FALSE
+- **THEN** `getAccounts()` returns an array of 19 account objects
 
 #### Scenario: Returns empty array when worksheet has no data rows
 
 - **WHEN** the "帳戶管理" worksheet contains only the header row
 - **THEN** `getAccounts()` returns an empty array
+
+#### Scenario: Type defaults when H 欄 is blank
+
+- **WHEN** an account row has blank H 欄 (帳戶類型) and its name contains "現金"
+- **THEN** the returned object's `type` is "現金"; for any other blank-H account it is "銀行"
+
+#### Scenario: accountNumberHints splits comma-separated hints
+
+- **WHEN** an account's J 欄 (帳號識別) is "0015977,0381979"
+- **THEN** `accountNumberHints` is `['0015977', '0381979']`
 
 ---
 ### Requirement: Calculate account current balance
