@@ -294,6 +294,7 @@ function resolveImportedAccounts(parsed, accounts) {
   (parsed.transactions || []).forEach(function(tx) {
     var currency = String(tx.currency || 'TWD').toUpperCase();
     var acct = null;
+    if (st === '證券') { tx.accountNumber = ''; }
     if (tx.accountNumber) {
       acct = findAccountByNumber(accounts, tx.accountNumber);
       if (!acct) { unmatched[tx.accountNumber] = true; return; }
@@ -370,6 +371,251 @@ function extractFxCardPayment(parsed, accounts) {
 }
 
 /**
+ * 依「類型＋機構＋幣別」比對帳戶（唯一命中才回傳）——見上方 findAccountByTypeAndBank
+ */
+
+/**
+ * 依帳號分組後，用前後列餘額差修正方向（僅限銀行帳戶類型）
+ * 規則：同一 accountNumber 分組（保留原順序），逐一比較連續兩列的 balance；
+ * |Δbalance| 與 amount 相差 < 0.01 時，依 Δbalance 正負改寫 type；
+ * 任一餘額缺漏或金額對不上則該列方向維持原樣。
+ * @param {Object} parsed - { statementType, transactions }
+ * @returns {Object} parsed（就地修改並回傳）
+ */
+function fixDirectionByBalance(parsed) {
+  if (parsed.statementType !== '銀行帳戶') { return parsed; }
+  var txs = parsed.transactions || [];
+  var groups = {};
+  var order = [];
+  txs.forEach(function(tx) {
+    var key = String(tx.accountNumber || '');
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(tx);
+  });
+  order.forEach(function(key) {
+    var list = groups[key];
+    for (var i = 1; i < list.length; i++) {
+      var prev = list[i - 1], cur = list[i];
+      if (typeof prev.balance !== 'number' || typeof cur.balance !== 'number') { continue; }
+      var delta = cur.balance - prev.balance;
+      var amount = Number(cur.amount) || 0;
+      if (Math.abs(Math.abs(delta) - amount) < 0.01) {
+        cur.type = delta > 0 ? '收入' : '支出';
+      }
+    }
+  });
+  return parsed;
+}
+
+/**
+ * 把 counterparty 原文（若尚未出現在 description 中）附加到 description
+ * @param {Object} parsed - { transactions }
+ * @returns {Object} parsed
+ */
+function appendCounterparty(parsed) {
+  (parsed.transactions || []).forEach(function(tx) {
+    var cp = String(tx.counterparty || '').trim();
+    if (cp === '') { return; }
+    var digits = cp.replace(/\D/g, '');
+    var descDigits = String(tx.description || '').replace(/\D/g, '');
+    if (digits !== '' && descDigits.indexOf(digits) >= 0) { return; }
+    tx.description = String(tx.description || '').trim() ? (tx.description.trim() + ' ' + cp) : cp;
+  });
+  return parsed;
+}
+
+/**
+ * 丟棄金額為 0 的列，以及信用卡帳單中「入帳戶」（回饋入帳戶）的列；計入 parsed.skipped
+ * @param {Object} parsed - { statementType, skipped, transactions }
+ * @returns {Object} parsed
+ */
+function dropZeroAndRewardDeposits(parsed) {
+  var txs = parsed.transactions || [];
+  var dropped = 0;
+  var kept = txs.filter(function(tx) {
+    var amount = Math.abs(parseAmount(tx.amount));
+    if (amount === 0) { dropped++; return false; }
+    if (parsed.statementType === '信用卡') {
+      var text = (tx.item || '') + (tx.description || '');
+      if (text.indexOf('入帳戶') >= 0) { dropped++; return false; }
+    }
+    return true;
+  });
+  parsed.transactions = kept;
+  parsed.skipped = (parsed.skipped || 0) + dropped;
+  return parsed;
+}
+
+/** 分類同義詞對照表（支出） */
+var EXPENSE_CATEGORY_SYNONYMS = {
+  '娛樂': '休閒', '餐飲': '飲食', '訂閱': '休閒', '網購': '購物',
+  '交通費': '交通', '醫療費': '醫療', '投資獲利': '投資'
+};
+
+/** 分類同義詞對照表（收入） */
+var INCOME_CATEGORY_SYNONYMS = {};
+
+/** 分類關鍵字規則（商店/服務名稱 → 分類），僅在 LLM 分類非法時套用 */
+var CATEGORY_KEYWORD_RULES = [
+  { pattern: /統一超商|愛金卡|一卡通|悠遊卡/, category: '交通' },
+  { pattern: /優步-|uber\s*eats|foodpanda/i, category: '飲食' },
+  { pattern: /易遊網|netflix|xsolla|pikmin|google\s*play|youtube|pressplay/i, category: '休閒' },
+  { pattern: /momo|蝦皮|pchome/i, category: '購物' },
+  { pattern: /book|kobo|anthropic|openai|chatgpt|claude/i, category: '學習' }
+];
+
+/**
+ * 修正每筆交易的分類：先套同義詞對照，仍非法時用商店關鍵字規則，最後 fallback「其他」
+ * @param {Object} parsed - { transactions }
+ * @param {string[]} expenseCategories - 支出分類清單
+ * @param {string[]} incomeCategories - 收入分類清單
+ * @returns {Object} parsed
+ */
+function normalizeCategories(parsed, expenseCategories, incomeCategories) {
+  var expSet = {}, incSet = {};
+  (expenseCategories || []).forEach(function(c) { expSet[c] = true; });
+  (incomeCategories || []).forEach(function(c) { incSet[c] = true; });
+
+  (parsed.transactions || []).forEach(function(tx) {
+    var isExpense = tx.type === '支出';
+    var validSet = isExpense ? expSet : incSet;
+    var synonyms = isExpense ? EXPENSE_CATEGORY_SYNONYMS : INCOME_CATEGORY_SYNONYMS;
+    var category = tx.category;
+
+    if (validSet[category] && category !== '其他') { return; }
+    if (synonyms[category] && validSet[synonyms[category]]) {
+      tx.category = synonyms[category];
+      return;
+    }
+
+    var text = (tx.item || '') + ' ' + (tx.description || '');
+    for (var i = 0; i < CATEGORY_KEYWORD_RULES.length; i++) {
+      var rule = CATEGORY_KEYWORD_RULES[i];
+      if (rule.pattern.test(text) && validSet[rule.category]) {
+        tx.category = rule.category;
+        return;
+      }
+    }
+
+    tx.category = '其他';
+  });
+  return parsed;
+}
+
+/**
+ * 銀行帳戶明細中，支出且品項/描述含「卡費／卡款／信用卡」（且非純換匯）→ 強制分類為「繳信用卡」
+ * @param {Object} parsed - { statementType, transactions }
+ * @returns {Object} parsed
+ */
+function forceCardPaymentCategory(parsed) {
+  if (parsed.statementType !== '銀行帳戶') { return parsed; }
+  (parsed.transactions || []).forEach(function(tx) {
+    if (tx.type !== '支出') { return; }
+    var text = (tx.item || '') + (tx.description || '');
+    if (/卡費|卡款|信用卡/.test(text)) {
+      tx.category = '繳信用卡';
+    }
+  });
+  return parsed;
+}
+
+/**
+ * 丟棄證券（交割戶）帳戶上的「定期買股／交割／證券買賣」列（以證券對帳單為準，避免重複）
+ * 需在 resolveImportedAccounts 之後呼叫（tx.account 已解析為帳戶名稱）
+ * @param {Object} parsed - { skipped, notes, transactions }
+ * @param {Object[]} accounts - 帳戶清單
+ * @returns {Object} parsed
+ */
+function dropSettlementBuyRows(parsed, accounts) {
+  var brokerageNames = {};
+  (accounts || []).forEach(function(a) { if (a.type === '證券') { brokerageNames[a.name] = true; } });
+  var txs = parsed.transactions || [];
+  var dropped = 0;
+  var kept = txs.filter(function(tx) {
+    if (brokerageNames[tx.account] && tx.category === '投資' && /定期買股|交割|證券買賣/.test((tx.item || '') + (tx.description || ''))) {
+      dropped++;
+      return false;
+    }
+    return true;
+  });
+  parsed.transactions = kept;
+  if (dropped > 0) {
+    parsed.skipped = (parsed.skipped || 0) + dropped;
+    parsed.notes = parsed.notes || [];
+    parsed.notes.push('交割戶買股扣款 ' + dropped + ' 筆已略過（以證券對帳單為準）');
+  }
+  return parsed;
+}
+
+/**
+ * 從 note 欄位拆出關鍵字 token：以 ＋+、，,空白 分隔，去除「卡」與「同一帳單」字樣
+ * @param {string} note - 帳戶備註
+ * @returns {string[]}
+ */
+function splitAccountNoteTokens(note) {
+  return String(note || '')
+    .split(/[＋+、，,\s]+/)
+    .map(function(s) { return s.replace(/同一帳單/g, '').replace(/卡$/, '').trim(); })
+    .filter(function(s) { return s !== ''; });
+}
+
+/**
+ * 從帳單原始文字中偵測所屬信用卡帳戶：依機構全名／機構去「銀行」／備註拆出的關鍵字逐一計分，
+ * 命中分數最高且唯一者回傳；平手或無命中回傳 null
+ * @param {string} text - stripGarbledLines 後的帳單原文
+ * @param {Object[]} accounts - 帳戶清單
+ * @param {string} [currency] - 幣別，未提供時不限制
+ * @returns {Object|null}
+ */
+function detectCardAccountFromText(text, accounts, currency) {
+  var lower = String(text || '').toLowerCase();
+  var cards = (accounts || []).filter(function(a) {
+    return a.type === '信用卡' && (!currency || (a.currency || 'TWD') === currency);
+  });
+  var scores = cards.map(function(a) {
+    var keywords = [a.institution, String(a.institution || '').replace(/銀行$/, '')]
+      .concat(splitAccountNoteTokens(a.note))
+      .filter(function(s) { return s && s.length >= 2; });
+    var score = 0;
+    keywords.forEach(function(k) {
+      if (lower.indexOf(String(k).toLowerCase()) >= 0) { score++; }
+    });
+    return { account: a, score: score };
+  }).filter(function(s) { return s.score > 0; });
+
+  if (scores.length === 0) { return null; }
+  scores.sort(function(a, b) { return b.score - a.score; });
+  if (scores.length > 1 && scores[0].score === scores[1].score) { return null; }
+  return scores[0].account;
+}
+
+/**
+ * 比對信用卡帳單解析總額與 statementTotals（本期新增款項），差異 ≥ 1 時寫入 parsed.notes
+ * @param {Object} parsed - { statementType, statementTotals, notes, transactions }
+ * @returns {Object} parsed
+ */
+function checkStatementTotals(parsed) {
+  if (parsed.statementType !== '信用卡' || !parsed.statementTotals || parsed.statementTotals.length === 0) { return parsed; }
+  var sums = {};
+  (parsed.transactions || []).forEach(function(tx) {
+    var cur = String(tx.currency || 'TWD').toUpperCase();
+    sums[cur] = sums[cur] || 0;
+    sums[cur] += (tx.type === '支出' ? 1 : -1) * (Number(tx.amount) || 0);
+  });
+  parsed.notes = parsed.notes || [];
+  parsed.statementTotals.forEach(function(st) {
+    var cur = String(st.currency || 'TWD').toUpperCase();
+    var got = Math.round((sums[cur] || 0) * 100) / 100;
+    var expected = Number(st.newCharges) || 0;
+    var diff = Math.round((got - expected) * 100) / 100;
+    if (Math.abs(diff) >= 1) {
+      parsed.notes.push((cur === 'TWD' ? '臺幣' : cur) + '解析合計 ' + got + ' 與帳單本期新增款項 ' + expected + ' 不符（差 ' + diff + '），請核對');
+    }
+  });
+  return parsed;
+}
+
+/**
  * 呼叫 OpenAI API 批次解析 PDF 帳單文字
  * @param {string} text - PDF 擷取的文字內容
  * @param {string[]} expenseCategories - 支出分類清單
@@ -382,9 +628,10 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts)
   var url = 'https://api.openai.com/v1/chat/completions';
 
   var systemPrompt = buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts);
+  var model = getConfig('OPENAI_MODEL') || 'gpt-4o-mini';
 
   var payload = {
-    model: 'gpt-4o-mini',
+    model: model,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: text }
@@ -413,19 +660,37 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts)
   var resJson = JSON.parse(response.getContentText());
   var content = resJson.choices[0].message.content;
   var parsed = JSON.parse(content);
+  accounts = accounts || [];
 
   if (parsed.transactions) {
     parsed.transactions = parsed.transactions.map(function(tx) {
       tx.amount = Number(tx.amount);
+      if (typeof tx.balance !== 'undefined' && tx.balance !== null && tx.balance !== '') {
+        tx.balance = Number(tx.balance);
+      } else {
+        tx.balance = null;
+      }
       return tx;
     });
   }
 
-  parsed = extractFxCardPayment(parsed, accounts || []);
-  var resolved = resolveImportedAccounts(parsed, accounts || []);
+  if (parsed.statementType === '信用卡') {
+    var detected = detectCardAccountFromText(text, accounts, null);
+    if (detected) { parsed.bank = detected.institution; }
+  }
+
+  dropZeroAndRewardDeposits(parsed);
+  fixDirectionByBalance(parsed);
+  appendCounterparty(parsed);
+  forceCardPaymentCategory(parsed);
+  parsed = extractFxCardPayment(parsed, accounts);
+  var resolved = resolveImportedAccounts(parsed, accounts);
   parsed.transactions = resolved.transactions;
   parsed.unmatchedAccountNumbers = resolved.unmatchedAccountNumbers;
   parsed.intraAccountSkipped = resolved.intraAccountSkipped;
+  dropSettlementBuyRows(parsed, accounts);
+  normalizeCategories(parsed, expenseCategories, incomeCategories);
+  checkStatementTotals(parsed);
 
   return parsed;
 }
