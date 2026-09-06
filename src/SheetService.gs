@@ -118,18 +118,23 @@ function getAccounts(ss) {
     return [];
   }
 
-  var values = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  var values = sheet.getRange(2, 1, lastRow - 1, 10).getValues();
   var accounts = values
     .map(function(row) {
       var activeValue = row[6];
+      var name = String(row[0] || '').trim();
+      var rawType = String(row[7] || '').trim();
       return {
-        name: String(row[0] || '').trim(),
+        name: name,
         institution: String(row[1] || '').trim(),
         currency: String(row[2] || 'TWD').trim() || 'TWD',
         initialBalance: parseAmount(row[3]),
         initialDate: normalizeDateString(row[4]),
         note: String(row[5] || '').trim(),
-        active: activeValue === true || String(activeValue).toUpperCase() === 'TRUE'
+        active: activeValue === true || String(activeValue).toUpperCase() === 'TRUE',
+        type: rawType || (name.indexOf('現金') >= 0 ? '現金' : '銀行'),
+        debitAccount: String(row[8] || '').trim(),
+        accountNumberHints: String(row[9] || '').split(/[,，、]/).map(function(s) { return s.trim(); }).filter(function(s) { return s !== ''; })
       };
     })
     .filter(function(account) {
@@ -145,6 +150,19 @@ function getAccounts(ss) {
     account.institutionUnique = sameCount === 1;
   });
   return accounts;
+}
+
+/**
+ * 依名稱（正規化比對）在帳戶清單中尋找帳戶
+ * @param {Object[]} accounts - getAccounts() 回傳的帳戶陣列
+ * @param {string} name - 要尋找的帳戶名稱
+ * @returns {Object|null}
+ */
+function findAccountByName(accounts, name) {
+  var target = normalizeName(name);
+  if (target === '') { return null; }
+  for (var i = 0; i < accounts.length; i++) { if (normalizeName(accounts[i].name) === target) { return accounts[i]; } }
+  return null;
 }
 
 /**
