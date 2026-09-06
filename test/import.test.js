@@ -197,6 +197,42 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     assert.ok(!text.includes('ℹ'), text);
   });
 
+  t('buildImportSummary：result.fallbackAccountNumbers 非空時依帳戶分組顯示「未填帳號識別」提示', () => {
+    const resultWithFallback = Object.assign({}, result, {
+      fallbackAccountNumbers: ['198-00*-**10443-*'],
+      transactions: [
+        { type: '支出', amount: 100, account: '永豐大戶', accountNumber: '198-00*-**10443-*' },
+        { type: '收入', amount: 50, account: '永豐大戶', accountNumber: '198-01*-**10443-*' }
+      ]
+    });
+    const text = gs2.buildImportSummary(resultWithFallback, 'PDF', outcome);
+    assert.ok(text.includes('未填帳號識別，已依銀行歸到「永豐大戶」：198-00*-**10443-*（建議在帳戶管理 J 欄填入）'), text);
+  });
+
+  t('buildImportSummary：result.fallbackAccountNumbers 未提供時不顯示該行', () => {
+    const text = gs2.buildImportSummary(result, 'PDF', outcome);
+    assert.ok(!text.includes('未填帳號識別'), text);
+  });
+
+  t('buildImportSummary：零交易且有 unmatchedAccountNumbers 時仍顯示未對應帳號行（供 buildEmptyImportReply 沿用）', () => {
+    const emptyResult = {
+      bank: '永豐銀行', statementType: '銀行帳戶', transactions: [],
+      unmatchedAccountNumbers: ['198-00*-**10443-*']
+    };
+    const text = gs2.buildImportSummary(emptyResult, 'PDF', null);
+    assert.ok(text.includes('未對應帳號：198-00*-**10443-*'), text);
+  });
+
+  t('buildEmptyImportReply：無交易時前綴「無法從此帳單解析出交易紀錄」並附上診斷資訊', () => {
+    const emptyResult = {
+      bank: '永豐銀行', statementType: '銀行帳戶', transactions: [],
+      unmatchedAccountNumbers: ['198-00*-**10443-*']
+    };
+    const text = gs2.buildEmptyImportReply(emptyResult, 'PDF');
+    assert.ok(text.startsWith('無法從此帳單解析出交易紀錄。'), text);
+    assert.ok(text.includes('未對應帳號：198-00*-**10443-*'), text);
+  });
+
   // ---- importTransactions（端對端，沿用 gs2） ----
 
   function acctRow(name, institution, type, debitAccount, hints) {
@@ -332,6 +368,24 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     assert.strictEqual(result.matched, 0);
   });
 
+  t('migrateCreditCardRows：預設排除薪資分類與含「利息存入」品項的列，只搬移商戶消費列', () => {
+    const txSheet = fakeSheet([
+      txRow('2026/04/05', '永豐銀行', '永豐大戶', '收入', '薪資', '薪資', '', 50000, 'TWD', 'a', 'PDF匯入'),
+      txRow('2026/04/06', '永豐銀行', '永豐大戶', '收入', '其他', '利息存入', '', 12, 'TWD', 'b', 'PDF匯入'),
+      txRow('2026/04/07', '永豐銀行', '永豐大戶', '支出', '購物', '全聯', '', 850, 'TWD', 'c', 'PDF匯入')
+    ]);
+    const acctSheet = fakeSheet([
+      migAcctRow('永豐大戶', '永豐銀行', '銀行', ''),
+      migAcctRow('永豐信用卡', '永豐銀行', '信用卡', '永豐大戶')
+    ]);
+    const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': acctSheet });
+    const result = gs.migrateCreditCardRows('永豐大戶', '永豐信用卡', '', '', true, ss);
+    assert.strictEqual(result.matched, 1);
+    assert.strictEqual(result.excluded, 2);
+    const row3 = txSheet.getRange(4, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row3[5], '全聯');
+  });
+
   t('migrateCreditCardRows：目標帳戶不存在時拋錯', () => {
     const { ss } = buildMigrateFixture();
     assert.throws(() => gs.migrateCreditCardRows('一銀', '不存在帳戶', '', '', true, ss), /找不到目標帳戶/);
@@ -410,6 +464,47 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     const row1 = txSheet.getRange(2, 1, 1, 12).getValues()[0];
     assert.strictEqual(row1[1], '第一銀行');
     assert.strictEqual(row1[2], '一銀信用卡');
+  });
+
+  function buildUndoFixture() {
+    const txSheet = fakeSheet([
+      txRow('2026/05/03', '永豐銀行', '永豐信用卡', '支出', '休閒', 'NETFLIX', '', 390, 'TWD', 'a', 'PDF匯入'),
+      txRow('2026/05/04', '永豐銀行', '永豐信用卡', '收入', '轉帳', '卡費入帳', '', 3000, 'TWD', 'b', 'PDF匯入')
+    ]);
+    const acctSheet = fakeSheet([
+      migAcctRow('一銀', '第一銀行', '銀行', ''),
+      migAcctRow('一銀信用卡', '第一銀行', '信用卡', '一銀'),
+      migAcctRow('國泰', '國泰銀行', '銀行', ''),
+      migAcctRow('國泰信用卡', '國泰銀行', '信用卡', '國泰'),
+      migAcctRow('永豐大戶', '永豐銀行', '銀行', ''),
+      migAcctRow('永豐信用卡', '永豐銀行', '信用卡', '永豐大戶')
+    ]);
+    const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': acctSheet });
+    return { txSheet, ss };
+  }
+
+  t('previewUndoMigrations：不拋錯、dryRun 不寫入，永豐信用卡上的消費列符合還原但卡費入帳轉帳列被排除', () => {
+    const { txSheet, ss } = buildUndoFixture();
+    const results = gs3.previewUndoMigrations(ss);
+    const yongfeng = results.find(r => r.name === '永豐');
+    assert.strictEqual(yongfeng.matched, 1);
+    assert.strictEqual(yongfeng.moved, 0);
+    const row1 = txSheet.getRange(2, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row1[2], '永豐信用卡');
+  });
+
+  t('undoMigrations：把永豐信用卡上的消費列搬回永豐大戶，卡費入帳轉帳列不動', () => {
+    const { txSheet, ss } = buildUndoFixture();
+    const results = gs3.undoMigrations(ss);
+    const yongfeng = results.find(r => r.name === '永豐');
+    assert.strictEqual(yongfeng.matched, 1);
+    assert.strictEqual(yongfeng.moved, 1);
+
+    const rows = txSheet.getRange(2, 1, 2, 12).getValues();
+    const netflixRow = rows.find(r => r[5] === 'NETFLIX');
+    assert.strictEqual(netflixRow[2], '永豐大戶');
+    const cardFeeRow = rows.find(r => r[5] === '卡費入帳');
+    assert.strictEqual(cardFeeRow[2], '永豐信用卡');
   });
 }
 
