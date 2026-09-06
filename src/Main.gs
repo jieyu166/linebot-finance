@@ -97,7 +97,7 @@ function handleTextMessage(event) {
     // 寫入試算表
     var now = new Date();
     var dateStr = Utilities.formatDate(now, 'Asia/Taipei', 'yyyy/MM/dd');
-    appendTransaction(
+    var written = appendTransaction(
       dateStr,
       parsed.institution || '現金',
       parsed.account || '',
@@ -121,6 +121,15 @@ function handleTextMessage(event) {
     if (parsed.institution && parsed.institution !== '現金') {
       replyText += '\n機構：' + parsed.institution;
     }
+
+    // 繳信用卡／轉帳：嘗試自動配對對方帳戶
+    if (parsed.category === '繳信用卡' || parsed.category === '轉帳') {
+      var pairing = autoPairImportedTransactions([written], ss);
+      if (pairing.paired > 0) {
+        replyText += '\n已自動配對對方帳戶';
+      }
+    }
+
     replyToLine(replyToken, replyText);
 
   } catch (error) {
@@ -185,10 +194,10 @@ function handleFileMessage(event) {
       return;
     }
 
-    // 批次寫入試算表
-    appendTransactionsBatch(result.transactions, 'PDF匯入', ss);
+    // 去重、寫入、自動配對
+    var outcome = importTransactions(result, 'PDF匯入', ss);
 
-    replyToLine(replyToken, buildImportSummary(result, 'PDF'));
+    replyToLine(replyToken, buildImportSummary(result, 'PDF', outcome));
 
   } catch (error) {
     Logger.log('handleFileMessage error: ' + error.message);
@@ -395,26 +404,47 @@ function handleBankStatementText(replyToken, text, expenseCategories, incomeCate
     return;
   }
 
-  // 批次寫入試算表
-  appendTransactionsBatch(result.transactions, '文字匯入', ss);
+  // 去重、寫入、自動配對
+  var outcome = importTransactions(result, '文字匯入', ss);
 
-  replyToLine(replyToken, buildImportSummary(result, '文字'));
+  replyToLine(replyToken, buildImportSummary(result, '文字', outcome));
+}
+
+/**
+ * 串接匯入流程：去重 → 批次寫入 → 自動配對
+ * @param {Object} result - parsePdfWithOpenAI 結果（含 transactions）
+ * @param {string} source - 來源標記（'PDF匯入' 或 '文字匯入'）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { written, skipped, merged, pairing }
+ */
+function importTransactions(result, source, ss) {
+  var dedupe = dedupeAgainstSheet(result.transactions, ss);
+  var written = appendTransactionsBatch(dedupe.kept, source, ss);
+  for (var i = 0; i < written.length; i++) {
+    if (dedupe.kept[i] && dedupe.kept[i].fxAmount !== undefined) {
+      written[i].fxAmount = dedupe.kept[i].fxAmount;
+    }
+  }
+  var pairing = autoPairImportedTransactions(written, ss);
+  return { written: written, skipped: dedupe.skipped, merged: dedupe.merged, pairing: pairing };
 }
 
 /**
  * 建構匯入摘要回覆訊息（共用）
  * @param {Object} result - parsePdfWithOpenAI 結果
  * @param {string} source - 來源（'PDF' 或 '文字'）
+ * @param {Object} [outcome] - importTransactions 回傳的結果
  * @returns {string} 格式化的回覆訊息
  */
-function buildImportSummary(result, source) {
+function buildImportSummary(result, source, outcome) {
   var expenseCount = 0;
   var expenseTotal = 0;
   var incomeCount = 0;
   var incomeTotal = 0;
 
-  for (var i = 0; i < result.transactions.length; i++) {
-    var tx = result.transactions[i];
+  var txList = outcome ? outcome.written : result.transactions;
+  for (var i = 0; i < txList.length; i++) {
+    var tx = txList[i];
     if (tx.type === '支出') {
       expenseCount++;
       expenseTotal += tx.amount;
@@ -429,7 +459,10 @@ function buildImportSummary(result, source) {
   if (result.bank) {
     replyText += '銀行：' + result.bank + '\n';
   }
-  replyText += '共匯入 ' + result.transactions.length + ' 筆交易\n';
+  if (result.statementType) {
+    replyText += '帳單類型：' + result.statementType + '\n';
+  }
+  replyText += '共匯入 ' + txList.length + ' 筆交易\n';
   if (expenseCount > 0) {
     replyText += '  支出：' + expenseCount + ' 筆，合計 ' + expenseTotal.toLocaleString() + ' 元\n';
   }
@@ -437,7 +470,33 @@ function buildImportSummary(result, source) {
     replyText += '  收入：' + incomeCount + ' 筆，合計 ' + incomeTotal.toLocaleString() + ' 元\n';
   }
   if (result.skipped && result.skipped > 0) {
-    replyText += '  （跳過 ' + result.skipped + ' 筆無法辨識的項目）';
+    replyText += '  （跳過 ' + result.skipped + ' 筆無法辨識的項目）\n';
+  }
+
+  if (outcome) {
+    if (outcome.skipped && outcome.skipped.length > 0) {
+      replyText += '  跳過與既有紀錄重複 ' + outcome.skipped.length + ' 筆';
+      if (outcome.merged > 0) {
+        replyText += '（更新 ' + outcome.merged + ' 筆股名）';
+      }
+      replyText += '\n';
+    }
+    if (outcome.pairing && outcome.pairing.paired > 0) {
+      replyText += '  已自動配對 ' + outcome.pairing.paired + ' 筆';
+      if (outcome.pairing.created > 0) {
+        replyText += '（新增 ' + outcome.pairing.created + ' 筆對方帳戶紀錄）';
+      }
+      replyText += '\n';
+    }
+    if (outcome.pairing && outcome.pairing.details) {
+      for (var d = 0; d < outcome.pairing.details.length; d++) {
+        replyText += '  ⚠ ' + outcome.pairing.details[d] + '\n';
+      }
+    }
+  }
+
+  if (result.unmatchedAccountNumbers && result.unmatchedAccountNumbers.length > 0) {
+    replyText += '  未對應帳號：' + result.unmatchedAccountNumbers.join('、') + '（請在帳戶管理 J 欄填帳號識別）\n';
   }
 
   return replyText.trim();
