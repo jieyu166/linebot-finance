@@ -123,6 +123,202 @@ function unlinkTransfer(transferId, ss) {
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object[]} 兩筆交易物件
  */
+/**
+ * 銀行代號 → 機構名稱對照表
+ */
+var BANK_CODE_MAP = { '808': '玉山銀行', '812': '台新銀行', '822': '中國信託', '013': '國泰銀行', '012': '富邦銀行',
+  '007': '第一銀行', '824': 'LINE Bank', '048': '王道銀行', '810': '樂天銀行', '807': '永豐銀行', '700': '中華郵政', '006': '合作金庫' };
+
+/**
+ * 去除字串中所有非數字字元
+ * @param {*} s
+ * @returns {string}
+ */
+function digitsOnly(s) { return String(s || '').replace(/\D/g, ''); }
+
+/**
+ * 去除字串開頭的連續 0
+ * @param {*} s
+ * @returns {string}
+ */
+function stripLeadingZeros(s) { return String(s || '').replace(/^0+/, ''); }
+
+/**
+ * 判斷帳號是否符合帳號提示：兩邊去「-」與前導零後，帳號以提示為前綴
+ * @param {*} number - 帳號候選字串
+ * @param {*} hint - 帳戶設定中的帳號提示
+ * @returns {boolean}
+ */
+function hintMatches(number, hint) {
+  var n = stripLeadingZeros(String(number || '').replace(/[-\s]/g, ''));
+  var h = stripLeadingZeros(String(hint || '').replace(/[-\s]/g, ''));
+  return h !== '' && n.indexOf(h) === 0;
+}
+
+/**
+ * 從文字中辨識對方帳戶：取 text 中所有 ≥8 位數字串，對所有帳戶的 accountNumberHints 做前綴比對
+ * @param {string} text - 交易描述文字
+ * @param {Object[]} accounts - 帳戶清單
+ * @returns {Object|null} 唯一命中帳戶；無命中或命中多個帳戶時回傳 null
+ */
+function matchCounterpartyAccount(text, accounts) {
+  var nums = String(text || '').match(/\d{8,}/g) || [];
+  var hits = {};
+  nums.forEach(function(d) {
+    [d, d.slice(3)].forEach(function(cand) {
+      accounts.forEach(function(a) {
+        (a.accountNumberHints || []).forEach(function(h) { if (hintMatches(cand, h)) { hits[a.name] = a; } });
+      });
+    });
+  });
+  var names = Object.keys(hits);
+  return names.length === 1 ? hits[names[0]] : null;
+}
+
+/**
+ * 從文字中解析對方銀行機構名稱：取最長 ≥10 位數字串，前三碼查銀行代號
+ * @param {string} text - 交易描述文字
+ * @returns {string} 機構名稱；無法解析時回傳 ''
+ */
+function parseCounterpartyBank(text) {
+  var nums = String(text || '').match(/\d{10,}/g) || [];
+  if (nums.length === 0) { return ''; }
+  nums.sort(function(a, b) { return b.length - a.length; });
+  return BANK_CODE_MAP[nums[0].slice(0, 3)] || '';
+}
+
+/**
+ * 取交易描述＋品項的正規化文字，供比對用
+ * @param {Object} tx - 交易物件
+ * @returns {string}
+ */
+function textOf(tx) { return normalizeName((tx.description || '') + ' ' + (tx.item || '')); }
+
+/**
+ * 依「換匯／外幣」提示過濾幣別候選清單；過濾後為空時回傳原清單
+ * @param {Object} tx - 交易物件
+ * @param {Object[]} list - 候選帳戶清單
+ * @returns {Object[]}
+ */
+function filterByCurrencyHint(tx, list) {
+  var fx = /換匯|外幣|usd/.test(textOf(tx));
+  var f = list.filter(function(a) { return fx ? a.currency !== 'TWD' : a.currency === 'TWD'; });
+  return f.length > 0 ? f : list;
+}
+
+/**
+ * 辨識「繳信用卡」交易對應的信用卡帳戶
+ * @param {Object} tx - 交易物件
+ * @param {Object[]} accounts - 帳戶清單
+ * @returns {Object|null}
+ */
+function resolveCreditCardAccount(tx, accounts) {
+  var text = textOf(tx);
+  var cards = accounts.filter(function(a) { return a.type === '信用卡'; });
+  var byName = cards.filter(function(a) { return text.indexOf(normalizeName(a.name)) >= 0; });
+  if (byName.length === 1) { return byName[0]; }
+  var byInst = filterByCurrencyHint(tx, cards.filter(function(a) {
+    var inst = normalizeName(a.institution), short = inst.replace(/銀行$/, '');
+    return inst !== '' && (text.indexOf(inst) >= 0 || (short.length >= 2 && text.indexOf(short) >= 0));
+  }));
+  if (byInst.length === 1) { return byInst[0]; }
+  var byDebit = filterByCurrencyHint(tx, cards.filter(function(a) { return normalizeName(a.debitAccount) === normalizeName(tx.account); }));
+  return byDebit.length === 1 ? byDebit[0] : null;
+}
+
+/**
+ * 辨識「轉帳」交易對應的證券（交割戶）帳戶
+ * @param {Object} tx - 交易物件
+ * @param {Object[]} accounts - 帳戶清單
+ * @returns {Object|null}
+ */
+function resolveBrokerageAccount(tx, accounts) {
+  var brokers = accounts.filter(function(a) { return a.type === '證券'; });
+  var cp = matchCounterpartyAccount(tx.description, brokers);
+  if (cp) { return cp; }
+  var text = textOf(tx);
+  if (!/交割|證券/.test(text)) { return null; }
+  var byDebit = brokers.filter(function(a) { return normalizeName(a.debitAccount) === normalizeName(tx.account); });
+  return byDebit.length === 1 ? byDebit[0] : null;
+}
+
+/**
+ * 判斷交易是否為 ATM 現金提款
+ * @param {Object} tx - 交易物件
+ * @returns {boolean}
+ */
+function isCashWithdrawal(tx) { return tx.type === '支出' && /現金提|atm提款|提款|提領/.test(textOf(tx)); }
+
+/**
+ * 建立與來源交易相對應的反向交易物件（用於自動配對新增列）
+ * @param {Object} tx - 來源交易
+ * @param {Object} target - 目標帳戶
+ * @param {number} amount - 金額
+ * @param {string} item - 品項
+ * @returns {Object}
+ */
+function buildCounterpartRow(tx, target, amount, item) {
+  return { date: tx.date, institution: target.institution, account: target.name, type: tx.type === '支出' ? '收入' : '支出',
+    category: '轉帳', item: item, description: '自動配對：' + (tx.item || tx.description || ''), currency: target.currency, amount: amount, source: '自動配對' };
+}
+
+/**
+ * 新增一筆反向交易列並與來源交易配對
+ * @param {Object} tx - 來源交易（需含 rowIndex）
+ * @param {Object} target - 目標帳戶
+ * @param {number} amount - 金額
+ * @param {string} item - 品項
+ * @param {Spreadsheet} ss - 試算表物件
+ */
+function pairWithNewRow(tx, target, amount, item, ss) {
+  var created = appendTransactionsBatch([buildCounterpartRow(tx, target, amount, item)], '自動配對', ss)[0];
+  writeTransferCells([tx, created], Utilities.getUuid(), null, ss);
+}
+
+/**
+ * 對匯入的交易清單做自動配對：繳信用卡、轉帳（含交割戶／ATM 現金提款）
+ * @param {Object[]} newTxs - 剛匯入的交易物件陣列（至少需含 id；跨幣別繳卡費時可含 fxAmount）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { paired, created, details[] }
+ */
+function autoPairImportedTransactions(newTxs, ss) {
+  ss = getSpreadsheet(ss);
+  var accounts = getAccounts(ss);
+  var result = { paired: 0, created: 0, details: [] };
+  for (var i = 0; i < newTxs.length; i++) {
+    var all = getTransactionRows(ss).map(function(r, idx) { return rowToTransaction(r, idx + 2); });
+    var tx = null;
+    for (var j = 0; j < all.length; j++) { if (all[j].id === newTxs[i].id) { tx = all[j]; } }
+    if (!tx || tx.transferId) { continue; }
+    var label = tx.category + ' ' + tx.date + ' ' + tx.account + ' ' + tx.amount;
+    if (tx.category === '繳信用卡') {
+      var card = resolveCreditCardAccount(tx, accounts);
+      if (!card) { result.details.push(label + '：無法判斷信用卡帳戶，請在 App 手動連結'); continue; }
+      var amt = tx.amount;
+      if (card.currency !== tx.currency) {
+        if (!newTxs[i].fxAmount) { result.details.push(label + '：外幣卡費金額不明，請在 App 手動連結'); continue; }
+        amt = newTxs[i].fxAmount;
+      }
+      pairWithNewRow(tx, card, amt, '卡費入帳', ss); result.created++; result.paired++;
+      continue;
+    }
+    if (tx.category !== '轉帳') { continue; }
+    var cp = matchCounterpartyAccount(tx.description, accounts);
+    var candidates = pickTransferCandidates(tx, all, accounts, { counterpartyAccount: cp ? cp.name : '', counterpartyBank: cp ? '' : parseCounterpartyBank(tx.description) });
+    if (candidates.length === 1) { writeTransferCells([tx, candidates[0]], Utilities.getUuid(), '轉帳', ss); result.paired++; continue; }
+    if (candidates.length > 1) { result.details.push(label + '：多個候選，請在 App 手動連結'); continue; }
+    if (tx.type !== '支出') { continue; }
+    if (isCashWithdrawal(tx)) {
+      var cash = accounts.filter(function(a) { return a.type === '現金' && a.currency === tx.currency; })[0];
+      if (cash) { pairWithNewRow(tx, cash, tx.amount, 'ATM 提款', ss); result.created++; result.paired++; }
+      continue;
+    }
+    var broker = resolveBrokerageAccount(tx, accounts);
+    if (broker && broker.currency === tx.currency) { pairWithNewRow(tx, broker, tx.amount, '交割戶入帳', ss); result.created++; result.paired++; }
+  }
+  return result;
+}
+
 function createTransfer(params, ss) {
   ss = getSpreadsheet(ss);
   var accounts = getAccounts(ss);

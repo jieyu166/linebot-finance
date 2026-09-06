@@ -248,5 +248,219 @@ t('unlinkTransfer：找不到該轉帳ID回傳 0', () => {
   assert.strictEqual(rows[1][11], '');
 });
 
+// ---- Task 6: 對方帳戶辨識、繳卡費／交割戶／ATM 自動配對 ----
+
+function accountRowFull(name, institution, currency, type, debitAccount, hints) {
+  return [name, institution, currency, '', '', '', true, type, debitAccount || '', hints || ''];
+}
+function acctSheet(rows) {
+  return { getLastRow: () => rows.length + 1, getRange: () => ({ getValues: () => rows }) };
+}
+function acctList(rows) {
+  return gs.getAccounts(fakeSs({ '帳戶管理': acctSheet(rows) }));
+}
+function txRowFull(date, inst, account, type, cat, item, desc, amount, currency, id, transferId) {
+  return [date, inst, account, type, cat, item || '', desc || '', currency || 'TWD', amount, '', id, transferId || ''];
+}
+
+const accounts2Rows = [
+  accountRowFull('永豐大戶', '永豐銀行', 'TWD', '銀行', '', '198-01'),
+  accountRowFull('永豐證券', '永豐銀行', 'TWD', '證券', '永豐大戶', '042-01'),
+  accountRowFull('永豐外幣', '永豐銀行', 'USD', '銀行', '', '042-00'),
+  accountRowFull('玉山', '玉山銀行', 'TWD', '銀行', '', '0015977,0381979'),
+  accountRowFull('一銀', '第一銀行', 'TWD', '銀行', '', '630'),
+  accountRowFull('台新', '台新銀行', 'TWD', '銀行', '', '288810,288815,288818')
+];
+function accounts2() { return acctList(accounts2Rows); }
+
+// ---- stripLeadingZeros / hintMatches ----
+
+t('stripLeadingZeros：去除前導零', () => {
+  assert.strictEqual(gs.stripLeadingZeros('00123'), '123');
+  assert.strictEqual(gs.stripLeadingZeros(''), '');
+});
+
+t('hintMatches：去槓去前導零後前綴比對', () => {
+  assert.strictEqual(gs.hintMatches('0019801800104436', '198-01'), true);
+  assert.strictEqual(gs.hintMatches('123456', '999'), false);
+});
+
+// ---- matchCounterpartyAccount ----
+
+t('matchCounterpartyAccount：跨行轉帳號比對永豐大戶', () => {
+  const m = gs.matchCounterpartyAccount('跨行轉 0019801800104436', accounts2());
+  assert.ok(m);
+  assert.strictEqual(m.name, '永豐大戶');
+});
+
+t('matchCounterpartyAccount：手機轉帳帳號比對玉山', () => {
+  const m = gs.matchCounterpartyAccount('手機轉帳 8080000381979084481', accounts2());
+  assert.ok(m);
+  assert.strictEqual(m.name, '玉山');
+});
+
+t('matchCounterpartyAccount：跨行轉帳號比對一銀', () => {
+  const m = gs.matchCounterpartyAccount('跨行轉 0000063057052425', accounts2());
+  assert.ok(m);
+  assert.strictEqual(m.name, '一銀');
+});
+
+t('matchCounterpartyAccount：手機轉帳帳號比對永豐證券', () => {
+  const m = gs.matchCounterpartyAccount('手機轉帳 04201820006159', accounts2());
+  assert.ok(m);
+  assert.strictEqual(m.name, '永豐證券');
+});
+
+t('matchCounterpartyAccount：無 8 位以上數字回傳 null', () => {
+  assert.strictEqual(gs.matchCounterpartyAccount('午餐分攤', accounts2()), null);
+});
+
+// ---- parseCounterpartyBank ----
+
+t('parseCounterpartyBank：依銀行代碼解析機構名', () => {
+  assert.strictEqual(gs.parseCounterpartyBank('8220000234540289458'), '中國信託');
+});
+
+t('parseCounterpartyBank：無 10 位以上數字回傳空字串', () => {
+  assert.strictEqual(gs.parseCounterpartyBank('轉帳 123'), '');
+});
+
+// ---- resolveCreditCardAccount ----
+
+t('resolveCreditCardAccount：機構簡稱比對唯一信用卡（永豐卡費）', () => {
+  const a = acctList([
+    accountRowFull('永豐信用卡', '永豐銀行', 'TWD', '信用卡', '永豐大戶', ''),
+    accountRowFull('一銀信用卡', '第一銀行', 'TWD', '信用卡', '一銀', '')
+  ]);
+  const result = gs.resolveCreditCardAccount(tx({ account: '永豐大戶', description: '永豐卡費' }), a);
+  assert.ok(result);
+  assert.strictEqual(result.name, '永豐信用卡');
+});
+
+t('resolveCreditCardAccount：卡費換匯比對外幣卡', () => {
+  const a = acctList([
+    accountRowFull('永豐信用卡', '永豐銀行', 'TWD', '信用卡', '永豐大戶', ''),
+    accountRowFull('永豐信用卡外幣', '永豐銀行', 'USD', '信用卡', '永豐外幣', '')
+  ]);
+  const result = gs.resolveCreditCardAccount(tx({ account: '永豐大戶', description: '永豐卡費換匯' }), a);
+  assert.ok(result);
+  assert.strictEqual(result.name, '永豐信用卡外幣');
+});
+
+t('resolveCreditCardAccount：機構全名比對第一銀行自扣', () => {
+  const a = acctList([
+    accountRowFull('永豐信用卡', '永豐銀行', 'TWD', '信用卡', '永豐大戶', ''),
+    accountRowFull('一銀信用卡', '第一銀行', 'TWD', '信用卡', '一銀', '')
+  ]);
+  const result = gs.resolveCreditCardAccount(tx({ account: '一銀', description: '第一銀行自動扣款' }), a);
+  assert.ok(result);
+  assert.strictEqual(result.name, '一銀信用卡');
+});
+
+t('resolveCreditCardAccount：無提示且同扣款帳戶兩張卡回傳 null', () => {
+  const a = acctList([
+    accountRowFull('永豐信用卡A', '永豐銀行', 'TWD', '信用卡', '永豐大戶', ''),
+    accountRowFull('永豐信用卡B', '永豐銀行', 'TWD', '信用卡', '永豐大戶', '')
+  ]);
+  const result = gs.resolveCreditCardAccount(tx({ account: '永豐大戶', description: '卡費' }), a);
+  assert.strictEqual(result, null);
+});
+
+t('resolveCreditCardAccount：無提示但扣款帳戶唯一回傳一銀信用卡', () => {
+  const a = acctList([
+    accountRowFull('一銀信用卡', '第一銀行', 'TWD', '信用卡', '一銀', '')
+  ]);
+  const result = gs.resolveCreditCardAccount(tx({ account: '一銀', description: '卡費' }), a);
+  assert.ok(result);
+  assert.strictEqual(result.name, '一銀信用卡');
+});
+
+// ---- resolveBrokerageAccount ----
+
+t('resolveBrokerageAccount：帳號比對唯一證券帳戶', () => {
+  const result = gs.resolveBrokerageAccount(tx({ account: '永豐大戶', description: '手機轉帳 04201820006159' }), accounts2());
+  assert.ok(result);
+  assert.strictEqual(result.name, '永豐證券');
+});
+
+// ---- isCashWithdrawal ----
+
+t('isCashWithdrawal：支出且含「現金提」成立', () => {
+  assert.strictEqual(gs.isCashWithdrawal(tx({ type: '支出', item: '現金提', description: 'ＡＴＭ' })), true);
+});
+
+t('isCashWithdrawal：收入類型不成立', () => {
+  assert.strictEqual(gs.isCashWithdrawal(tx({ type: '收入', item: '現金提' })), false);
+});
+
+// ---- buildCounterpartRow ----
+
+t('buildCounterpartRow：反向交易物件欄位', () => {
+  const target = { institution: '永豐銀行', name: '永豐信用卡', currency: 'TWD' };
+  const row = gs.buildCounterpartRow(tx({ type: '支出', item: '', description: '永豐卡費' }), target, 14684, '卡費入帳');
+  assert.strictEqual(row.type, '收入');
+  assert.strictEqual(row.category, '轉帳');
+  assert.strictEqual(row.item, '卡費入帳');
+  assert.strictEqual(row.account, '永豐信用卡');
+  assert.strictEqual(row.institution, '永豐銀行');
+  assert.strictEqual(row.currency, 'TWD');
+  assert.strictEqual(row.amount, 14684);
+  assert.strictEqual(row.source, '自動配對');
+});
+
+// ---- autoPairImportedTransactions ----
+
+t('autoPairImportedTransactions：繳卡費／轉帳唯一候選／ATM 提款 三情境', () => {
+  const acctRows = [
+    accountRowFull('永豐大戶', '永豐銀行', 'TWD', '銀行', '', '198-01'),
+    accountRowFull('永豐證券', '永豐銀行', 'TWD', '證券', '永豐大戶', '042-01'),
+    accountRowFull('永豐信用卡', '永豐銀行', 'TWD', '信用卡', '永豐大戶', ''),
+    accountRowFull('現金', '現金', 'TWD', '現金', '', '')
+  ];
+  const txSheet = fakeSheet([
+    txRowFull('2026/09/01', '永豐銀行', '永豐大戶', '支出', '繳信用卡', '', '永豐卡費 4637898810887000', 14684, 'TWD', 't1'),
+    txRowFull('2026/09/01', '永豐銀行', '永豐大戶', '支出', '轉帳', '', '手機轉帳 04201820006159', 10000, 'TWD', 't2'),
+    txRowFull('2026/09/01', '永豐銀行', '永豐證券', '收入', '', '', '', 10000, 'TWD', 'existing1'),
+    txRowFull('2026/09/01', '永豐銀行', '永豐大戶', '支出', '轉帳', '現金提', 'ＡＴＭ', 5000, 'TWD', 't3')
+  ]);
+  const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': acctSheet(acctRows) });
+
+  const result = gs.autoPairImportedTransactions([{ id: 't1' }, { id: 't2' }, { id: 't3' }], ss);
+  assert.strictEqual(result.paired, 3);
+  assert.strictEqual(result.created, 2);
+
+  const rows = txSheet.getRange(2, 1, 6, 12).getValues();
+  const row1 = rows[0]; // t1 繳信用卡
+  const row2 = rows[1]; // t2 轉帳
+  const row3 = rows[2]; // existing1 永豐證券收入
+  const row4 = rows[3]; // t3 ATM
+  const created1 = rows[4]; // 卡費入帳新列
+  const created2 = rows[5]; // ATM 提款新列
+
+  assert.strictEqual(created1[1], '永豐銀行');
+  assert.strictEqual(created1[2], '永豐信用卡');
+  assert.strictEqual(created1[3], '收入');
+  assert.strictEqual(created1[4], '轉帳');
+  assert.strictEqual(created1[5], '卡費入帳');
+  assert.strictEqual(created1[7], 'TWD');
+  assert.strictEqual(created1[8], 14684);
+  assert.ok(row1[11]);
+  assert.strictEqual(created1[11], row1[11]);
+
+  assert.ok(row2[11]);
+  assert.strictEqual(row2[11], row3[11]);
+  assert.strictEqual(row3[4], '轉帳');
+
+  assert.strictEqual(created2[1], '現金');
+  assert.strictEqual(created2[2], '現金');
+  assert.strictEqual(created2[3], '收入');
+  assert.strictEqual(created2[4], '轉帳');
+  assert.strictEqual(created2[5], 'ATM 提款');
+  assert.strictEqual(created2[7], 'TWD');
+  assert.strictEqual(created2[8], 5000);
+  assert.ok(row4[11]);
+  assert.strictEqual(created2[11], row4[11]);
+});
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);
