@@ -78,16 +78,15 @@ function handleTextMessage(event) {
     var expenseCategories = getCategories('支出分類', ss);
     var incomeCategories = getCategories('收入分類', ss);
     var accounts = getAccounts(ss);
-    var accountNames = accounts.map(function(account) { return account.name; });
 
     // 偵測是否為銀行帳單文字（多行、含帳單關鍵字）
     if (isBankStatement(userMessage)) {
-      handleBankStatementText(replyToken, userMessage, expenseCategories, incomeCategories, accountNames, ss);
+      handleBankStatementText(replyToken, userMessage, expenseCategories, incomeCategories, accounts, ss);
       return;
     }
 
     // 一般文字記帳流程
-    var parsed = parseWithOpenAI(userMessage, expenseCategories, incomeCategories, accountNames);
+    var parsed = parseWithOpenAI(userMessage, expenseCategories, incomeCategories, accounts);
 
     // 驗證解析結果
     if (!parsed || !parsed.amount || parsed.amount <= 0 || !parsed.category || !parsed.type) {
@@ -98,7 +97,7 @@ function handleTextMessage(event) {
     // 寫入試算表
     var now = new Date();
     var dateStr = Utilities.formatDate(now, 'Asia/Taipei', 'yyyy/MM/dd');
-    appendTransaction(
+    var written = appendTransaction(
       dateStr,
       parsed.institution || '現金',
       parsed.account || '',
@@ -122,11 +121,36 @@ function handleTextMessage(event) {
     if (parsed.institution && parsed.institution !== '現金') {
       replyText += '\n機構：' + parsed.institution;
     }
+
+    // 繳信用卡／轉帳：嘗試自動配對對方帳戶（配對失敗不影響已寫入的記帳，仍回報成功）
+    if (parsed.category === '繳信用卡' || parsed.category === '轉帳') {
+      var pairing = tryAutoPair([written], ss);
+      if (pairing.paired > 0) {
+        replyText += '\n已自動配對對方帳戶';
+      }
+    }
+
     replyToLine(replyToken, replyText);
 
   } catch (error) {
     Logger.log('handleTextMessage error: ' + error.message);
     replyToLine(replyToken, '記帳失敗，請稍後再試。\n錯誤：' + error.message);
+  }
+}
+
+/**
+ * 嘗試自動配對對方帳戶，失敗時記錄錯誤並回傳空結果，不中斷呼叫端流程
+ * @param {Object|Object[]} written - 已寫入的交易紀錄，陣列或單一物件皆可（單一物件會自動包成陣列）
+ * @param {Spreadsheet} ss
+ * @returns {{paired:number, created:number, details:Array}}
+ */
+function tryAutoPair(written, ss) {
+  try {
+    var newTxs = (Object.prototype.toString.call(written) === '[object Array]') ? written : [written];
+    return autoPairImportedTransactions(newTxs, ss);
+  } catch (e) {
+    Logger.log('auto-pair error: ' + e.message);
+    return { paired: 0, created: 0, details: [] };
   }
 }
 
@@ -165,17 +189,9 @@ function handleFileMessage(event) {
       return;
     }
 
-    // 偵測 OCR 格式損壞（中國信託等銀行 PDF 常見問題）
-    var cleanChars = text.replace(/[\s\d\.\,\/\-\+\*\(\)]/g, '');
-    var totalLen = cleanChars.length;
-    var garbledCount = 0;
-    for (var j = 0; j < cleanChars.length; j++) {
-      var code = cleanChars.charCodeAt(j);
-      if (code < 0x4E00 && code > 127 && !/[a-zA-Z]/.test(cleanChars[j])) {
-        garbledCount++;
-      }
-    }
-    if (totalLen > 0 && garbledCount / totalLen > 0.3) {
+    // 逐行過濾 OCR 亂碼行（中國信託等銀行 PDF 常見問題），只在全部被濾掉時才放棄
+    text = stripGarbledLines(text);
+    if (!text.trim()) {
       replyToLine(replyToken, '此帳單格式無法正確辨識，請嘗試其他方式提供明細。');
       return;
     }
@@ -185,20 +201,19 @@ function handleFileMessage(event) {
     var expenseCategories = getCategories('支出分類', ss);
     var incomeCategories = getCategories('收入分類', ss);
     var accounts = getAccounts(ss);
-    var accountNames = accounts.map(function(account) { return account.name; });
 
     // 呼叫 OpenAI 批次解析
-    var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accountNames);
+    var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts);
 
     if (!result.transactions || result.transactions.length === 0) {
       replyToLine(replyToken, '無法從此 PDF 中解析出交易紀錄，請確認是否為銀行帳單。');
       return;
     }
 
-    // 批次寫入試算表
-    appendTransactionsBatch(result.transactions, 'PDF匯入', ss);
+    // 去重、寫入、自動配對
+    var outcome = importTransactions(result, 'PDF匯入', ss);
 
-    replyToLine(replyToken, buildImportSummary(result, 'PDF'));
+    replyToLine(replyToken, buildImportSummary(result, 'PDF', outcome));
 
   } catch (error) {
     Logger.log('handleFileMessage error: ' + error.message);
@@ -276,8 +291,9 @@ function detectBalanceCommand(text) {
  */
 function formatAmount(amount) {
   amount = Number(amount) || 0;
-  var sign = amount < 0 ? '-' : '';
-  return sign + '$' + Math.abs(amount).toLocaleString();
+  var abs = Math.abs(amount);
+  var hasCents = Math.round(abs * 100) % 100 !== 0;
+  return (amount < 0 ? '-' : '') + '$' + abs.toLocaleString('en-US', { minimumFractionDigits: hasCents ? 2 : 0, maximumFractionDigits: 2 });
 }
 
 /**
@@ -295,6 +311,45 @@ function formatBalanceAmount(amount, currency) {
 }
 
 /**
+ * 格式化單一帳戶餘額一行文字：信用卡顯示「未繳」金額，其餘顯示原始餘額
+ * @param {Object} balance - calculateBalanceFromRows() 回傳物件（需含 name、type、currency、currentBalance）
+ * @returns {string}
+ */
+function formatBalanceLine(balance) {
+  if (balance.type === '信用卡') {
+    return balance.name + '：未繳 ' + formatBalanceAmount(-balance.currentBalance, balance.currency);
+  }
+  return balance.name + '：' + formatBalanceAmount(balance.currentBalance, balance.currency);
+}
+
+/**
+ * 建構全帳戶餘額一覽回覆訊息：分「【資產】」（非信用卡）與「【信用卡】」兩區
+ * @param {Object[]} balances - calculateBalanceFromRows() 回傳物件陣列
+ * @param {string} today - yyyy/MM/dd 格式日期字串
+ * @returns {string}
+ */
+function buildAllBalancesReply(balances, today) {
+  var assets = balances.filter(function(b) { return b.type !== '信用卡'; });
+  var creditCards = balances.filter(function(b) { return b.type === '信用卡'; });
+
+  var reply = '💰 帳戶餘額一覽（' + today + '）';
+  if (assets.length > 0) {
+    reply += '\n【資產】';
+    for (var i = 0; i < assets.length; i++) {
+      reply += '\n' + formatBalanceLine(assets[i]);
+    }
+  }
+  if (creditCards.length > 0) {
+    reply += '\n【信用卡】';
+    for (var j = 0; j < creditCards.length; j++) {
+      reply += '\n' + formatBalanceLine(creditCards[j]);
+    }
+  }
+  reply += '\n共 ' + balances.length + ' 個帳戶';
+  return reply;
+}
+
+/**
  * 處理餘額查詢指令
  * @param {string} replyToken
  * @param {string|null} accountName
@@ -309,12 +364,7 @@ function handleBalanceCommand(replyToken, accountName, ss) {
     }
 
     var today = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy/MM/dd');
-    var allReply = '💰 帳戶餘額一覽（' + today + '）';
-    for (var i = 0; i < balances.length; i++) {
-      allReply += '\n' + balances[i].name + '：' + formatBalanceAmount(balances[i].currentBalance, balances[i].currency);
-    }
-    allReply += '\n共 ' + balances.length + ' 個帳戶';
-    replyToLine(replyToken, allReply);
+    replyToLine(replyToken, buildAllBalancesReply(balances, today));
     return;
   }
 
@@ -359,37 +409,58 @@ function handleBalanceCommand(replyToken, accountName, ss) {
  * @param {string} text - 帳單文字
  * @param {string[]} expenseCategories
  * @param {string[]} incomeCategories
- * @param {string[]} accountNames
+ * @param {Object[]} accounts - 帳戶物件陣列
  */
-function handleBankStatementText(replyToken, text, expenseCategories, incomeCategories, accountNames, ss) {
+function handleBankStatementText(replyToken, text, expenseCategories, incomeCategories, accounts, ss) {
   // 呼叫批次解析（共用 PDF 的 prompt）
-  var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accountNames);
+  var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts);
 
   if (!result.transactions || result.transactions.length === 0) {
     replyToLine(replyToken, '無法從文字中解析出交易紀錄。\n請確認是否為銀行帳單明細，或嘗試傳送 PDF 檔案。');
     return;
   }
 
-  // 批次寫入試算表
-  appendTransactionsBatch(result.transactions, '文字匯入', ss);
+  // 去重、寫入、自動配對
+  var outcome = importTransactions(result, '文字匯入', ss);
 
-  replyToLine(replyToken, buildImportSummary(result, '文字'));
+  replyToLine(replyToken, buildImportSummary(result, '文字', outcome));
+}
+
+/**
+ * 串接匯入流程：去重 → 批次寫入 → 自動配對
+ * @param {Object} result - parsePdfWithOpenAI 結果（含 transactions）
+ * @param {string} source - 來源標記（'PDF匯入' 或 '文字匯入'）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { written, skipped, merged, pairing }
+ */
+function importTransactions(result, source, ss) {
+  var dedupe = dedupeAgainstSheet(result.transactions, ss);
+  var written = appendTransactionsBatch(dedupe.kept, source, ss);
+  for (var i = 0; i < written.length; i++) {
+    if (dedupe.kept[i] && dedupe.kept[i].fxAmount !== undefined) {
+      written[i].fxAmount = dedupe.kept[i].fxAmount;
+    }
+  }
+  var pairing = autoPairImportedTransactions(written, ss);
+  return { written: written, skipped: dedupe.skipped, merged: dedupe.merged, pairing: pairing };
 }
 
 /**
  * 建構匯入摘要回覆訊息（共用）
  * @param {Object} result - parsePdfWithOpenAI 結果
  * @param {string} source - 來源（'PDF' 或 '文字'）
+ * @param {Object} [outcome] - importTransactions 回傳的結果
  * @returns {string} 格式化的回覆訊息
  */
-function buildImportSummary(result, source) {
+function buildImportSummary(result, source, outcome) {
   var expenseCount = 0;
   var expenseTotal = 0;
   var incomeCount = 0;
   var incomeTotal = 0;
 
-  for (var i = 0; i < result.transactions.length; i++) {
-    var tx = result.transactions[i];
+  var txList = outcome ? outcome.written : result.transactions;
+  for (var i = 0; i < txList.length; i++) {
+    var tx = txList[i];
     if (tx.type === '支出') {
       expenseCount++;
       expenseTotal += tx.amount;
@@ -404,7 +475,10 @@ function buildImportSummary(result, source) {
   if (result.bank) {
     replyText += '銀行：' + result.bank + '\n';
   }
-  replyText += '共匯入 ' + result.transactions.length + ' 筆交易\n';
+  if (result.statementType) {
+    replyText += '帳單類型：' + result.statementType + '\n';
+  }
+  replyText += '共匯入 ' + txList.length + ' 筆交易\n';
   if (expenseCount > 0) {
     replyText += '  支出：' + expenseCount + ' 筆，合計 ' + expenseTotal.toLocaleString() + ' 元\n';
   }
@@ -412,7 +486,41 @@ function buildImportSummary(result, source) {
     replyText += '  收入：' + incomeCount + ' 筆，合計 ' + incomeTotal.toLocaleString() + ' 元\n';
   }
   if (result.skipped && result.skipped > 0) {
-    replyText += '  （跳過 ' + result.skipped + ' 筆無法辨識的項目）';
+    replyText += '  （跳過 ' + result.skipped + ' 筆無法辨識的項目）\n';
+  }
+
+  if (outcome) {
+    if (outcome.skipped && outcome.skipped.length > 0) {
+      replyText += '  跳過與既有紀錄重複 ' + outcome.skipped.length + ' 筆';
+      if (outcome.merged > 0) {
+        replyText += '（更新 ' + outcome.merged + ' 筆股名）';
+      }
+      replyText += '\n';
+    }
+    if (outcome.pairing && outcome.pairing.paired > 0) {
+      replyText += '  已自動配對 ' + outcome.pairing.paired + ' 筆';
+      if (outcome.pairing.created > 0) {
+        replyText += '（新增 ' + outcome.pairing.created + ' 筆對方帳戶紀錄）';
+      }
+      replyText += '\n';
+    }
+    if (outcome.pairing && outcome.pairing.details) {
+      for (var d = 0; d < outcome.pairing.details.length; d++) {
+        replyText += '  ⚠ ' + outcome.pairing.details[d] + '\n';
+      }
+    }
+  }
+
+  if (result.unmatchedAccountNumbers && result.unmatchedAccountNumbers.length > 0) {
+    replyText += '  未對應帳號：' + result.unmatchedAccountNumbers.join('、') + '（請在帳戶管理 J 欄填帳號識別）\n';
+  }
+  if (result.intraAccountSkipped && result.intraAccountSkipped.length > 0) {
+    replyText += '  同帳戶內轉已跳過 ' + result.intraAccountSkipped.length + ' 筆\n';
+  }
+  if (result.fxWarnings && result.fxWarnings.length > 0) {
+    for (var w = 0; w < result.fxWarnings.length; w++) {
+      replyText += '  ⚠ ' + result.fxWarnings[w] + '\n';
+    }
   }
 
   return replyText.trim();

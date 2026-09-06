@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'line-bot-accounting-app'. Update Purpose after archive.
+使用者透過 LINE 傳送一句自然語言或指定格式的文字訊息，系統呼叫 OpenAI 解析出類型、分類、品項、金額與帳戶，寫入「交易紀錄」工作表並嘗試自動配對轉帳／繳信用卡，最後以確認訊息回覆使用者。
 
 ## Requirements
 
@@ -38,9 +38,9 @@ code:
 ---
 ### Requirement: Parse text messages with OpenAI
 
-The system SHALL send the user's text message to OpenAI gpt-4o-mini API with a system prompt containing the current expense and income category lists AND the active account name list read from `getAccounts()`. The system SHALL use temperature 0 and response_format json_object. The API SHALL return a JSON object with fields: type (支出 or 收入), category (from the provided category list), item (short description), and amount (positive integer). The "account" field SHALL be selected from the provided account name list; ordinary cash transactions SHALL use account "現金"; if no account can be identified and the transaction is not cash, the field SHALL be an empty string.
+The system SHALL send the user's text message to OpenAI gpt-4o-mini API with a system prompt containing the current expense and income category lists AND the active account list read from `getAccounts()`. The system SHALL use temperature 0 and response_format json_object. The API SHALL return a JSON object with fields: type (支出 or 收入), category (from the provided category list), item (short description), and amount (positive integer). The "account" field SHALL be selected from the provided account list; ordinary cash transactions SHALL use account "現金"; if no account can be identified and the transaction is not cash, the field SHALL be an empty string.
 
-The function `parseWithOpenAI(message, expenseCategories, incomeCategories, accountNames)` SHALL accept a fourth parameter `accountNames` (array of strings) and pass it to `buildSystemPrompt()`. The `buildSystemPrompt()` function SHALL include the account name list in the system prompt with the instruction: "帳戶名稱必須從以下帳戶清單中選擇最接近的名稱；若完全無法對應，則填空字串" followed by the comma-separated account names.
+The function `parseWithOpenAI(message, expenseCategories, incomeCategories, accounts)` SHALL accept a fourth parameter `accounts` — an array of account objects (`{name, institution, currency, type, accountNumberHints}`, as returned by `getAccounts()`) — and pass it to `buildSystemPrompt()`. The `buildSystemPrompt()` function SHALL render this list via `describeAccounts(accounts)`, which formats each account as "名稱（機構，幣別，類型，帳號 hint1/hint2）" (the "，帳號 …" segment omitted when there are no non-blank `accountNumberHints`), joined with "、". Rule 7 of the system prompt SHALL be the exact string: "7. 帳戶名稱必須從以下帳戶清單中選擇；一般現金交易填「現金」；提到某銀行信用卡時選該銀行「類型=信用卡」的帳戶；無法對應則填空字串：" followed by `describeAccounts(accounts)`.
 
 #### Scenario: Natural language expense input
 
@@ -69,8 +69,8 @@ The function `parseWithOpenAI(message, expenseCategories, incomeCategories, acco
 
 #### Scenario: Account name matched from list
 
-- **WHEN** the user sends "玉山信用卡 加油1500" and the account list contains "玉山"
-- **THEN** OpenAI returns `{"account":"玉山","institution":"玉山銀行","type":"支出","category":"交通","item":"加油","amount":1500}`
+- **WHEN** the user sends "玉山信用卡 加油1500" and the `accounts` array (from `getAccounts()`) contains an object `{name: "玉山信用卡", institution: "玉山銀行", currency: "TWD", type: "信用卡", accountNumberHints: []}`, rendered in the prompt as "玉山信用卡（玉山銀行，TWD，信用卡）"
+- **THEN** OpenAI returns `{"account":"玉山信用卡","institution":"玉山銀行","type":"支出","category":"交通","item":"加油","amount":1500}`
 
 #### Scenario: Cash transaction uses cash account
 
@@ -80,27 +80,52 @@ The function `parseWithOpenAI(message, expenseCategories, incomeCategories, acco
 ---
 ### Requirement: Write transaction to Google Sheets
 
-The system SHALL append a new row to the "交易紀錄" worksheet with columns: date (yyyy/MM/dd in Asia/Taipei timezone), time (HH:mm), type, category, item, amount, and original message text. The date and time SHALL reflect the moment of processing, not a date mentioned in the message.
+The system SHALL append a new row to the "交易紀錄" worksheet via `appendTransaction()`, which writes all 12 columns (A–L): 日期 (yyyy/MM/dd in Asia/Taipei timezone, the moment of processing rather than any date mentioned in the message), 金融機構, 帳戶名稱, 類型, 分類, 品項, 明細描述, 幣別, 金額, 原始訊息 (the user's raw message text), K 欄 ID (a freshly generated `Utilities.getUuid()`), and L 欄 轉帳ID (left blank at write time).
 
 #### Scenario: Successful write
 
-- **WHEN** OpenAI successfully parses a message into type "支出", category "飲食", item "午餐便當", amount 80
-- **THEN** the system appends a row `[2026/04/08, 14:30, 支出, 飲食, 午餐便當, 80, 午餐便當80]` to the "交易紀錄" worksheet
+- **WHEN** OpenAI successfully parses "午餐便當80" into type "支出", category "飲食", item "午餐便當", amount 80, institution "現金", account "現金", currency "TWD"
+- **THEN** the system appends a 12-column row `[2026/04/08, 現金, 現金, 支出, 飲食, 午餐便當, 午餐便當80, TWD, 80, 午餐便當80, <generated UUID>, '']` to the "交易紀錄" worksheet
 
 ---
 ### Requirement: Reply confirmation via LINE
 
-The system SHALL reply to the user via LINE Reply API with a confirmation message containing the parsed type, category, item, and amount. Expense messages SHALL use the 💸 emoji prefix. Income messages SHALL use the 💰 emoji prefix.
+The system SHALL reply to the user via LINE Reply API with a confirmation message containing the parsed type, category, item, and amount (with currency), plus an 機構 line when 機構 is set and not "現金". Expense messages SHALL use the 💸 emoji prefix. Income messages SHALL use the 💰 emoji prefix.
 
 #### Scenario: Expense confirmation reply
 
-- **WHEN** a text message is successfully parsed and written as an expense
-- **THEN** the system replies: "💸 記帳成功！\n類型：支出\n分類：飲食\n品項：午餐便當\n金額：80 元"
+- **WHEN** a text message is successfully parsed and written as an expense with amount 80 TWD, no non-cash institution
+- **THEN** the system replies: "💸 記帳成功！\n類型：支出\n分類：飲食\n品項：午餐便當\n金額：80 TWD"
 
 #### Scenario: Income confirmation reply
 
-- **WHEN** a text message is successfully parsed and written as income
-- **THEN** the system replies: "💰 記帳成功！\n類型：收入\n分類：薪資\n品項：薪水\n金額：50000 元"
+- **WHEN** a text message is successfully parsed and written as income with amount 50000 TWD
+- **THEN** the system replies: "💰 記帳成功！\n類型：收入\n分類：薪資\n品項：薪水\n金額：50000 TWD"
+
+#### Scenario: Institution line appended for non-cash accounts
+
+- **WHEN** a text message resolves to institution "玉山銀行" (account "玉山信用卡")
+- **THEN** the confirmation reply gains a trailing line "機構：玉山銀行"
+
+---
+### Requirement: Single-entry auto-pair for 繳信用卡 and 轉帳 categories
+
+After writing a single text-accounting entry, if the parsed `category` is "繳信用卡" or "轉帳", the system SHALL call `tryAutoPair([written], ss)`, which wraps `autoPairImportedTransactions()` (see transfer-pairing) in a try/catch. When the pairing call succeeds and pairs at least one transaction (`pairing.paired > 0`), the confirmation reply SHALL gain a trailing line "已自動配對對方帳戶". When pairing fails (throws) or finds nothing to pair, `tryAutoPair` SHALL swallow the error (logging it), return `{ paired: 0, created: 0, details: [] }`, and the entry SHALL still be reported as successfully recorded — a pairing failure never turns a successful accounting entry into a failure reply.
+
+#### Scenario: 繳信用卡 entry auto-pairs and reply notes it
+
+- **WHEN** the user texts a message that OpenAI classifies as 支出／繳信用卡 against a bank account, and exactly one credit-card account can be resolved via `resolveCreditCardAccount`
+- **THEN** the entry is written, a counterpart 收入／轉帳 "卡費入帳" row is created on the resolved credit-card account sharing a new 轉帳ID, and the reply gains the line "已自動配對對方帳戶"
+
+#### Scenario: Pairing failure does not fail the accounting entry
+
+- **WHEN** `autoPairImportedTransactions` throws an exception while attempting to pair a 轉帳-category entry (e.g. a spreadsheet access error)
+- **THEN** `tryAutoPair` catches the exception, logs it, and the user still receives the normal "記帳成功！" confirmation reply without the "已自動配對對方帳戶" line
+
+#### Scenario: No auto-pair line when nothing is paired
+
+- **WHEN** the entry's category is "轉帳" but no counterpart candidate exists yet (e.g. the other side of the transfer has not been imported)
+- **THEN** the reply is the normal confirmation message without an "已自動配對對方帳戶" line
 
 ---
 ### Requirement: Handle parsing failures

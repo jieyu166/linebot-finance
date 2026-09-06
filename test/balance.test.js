@@ -8,7 +8,7 @@ function acct(over) {
 }
 // 交易列 A-I: 日期, 機構, 帳戶, 類型, 分類, 品項, 明細, 幣別, 金額
 function row(date, inst, account, type, cat, amount, currency) {
-  return [date, inst, account, type, cat, '', '', currency || 'TWD', amount];
+  return [date, inst, account, type, cat, '', '', currency || 'TWD', amount, '', '', ''];
 }
 
 let failed = 0;
@@ -84,9 +84,10 @@ t('幣別不同不計入', () => {
   assert.strictEqual(r.txCount, 0);
 });
 
-t('繳信用卡 排除', () => {
+t('繳信用卡 計入（視為一般支出）', () => {
   const r = gs.calculateBalanceFromRows(acct(), [row('2026/01/15', '永豐銀行', '永豐大戶', '支出', '繳信用卡', 5000)]);
-  assert.strictEqual(r.txCount, 0);
+  assert.strictEqual(r.txCount, 1);
+  assert.strictEqual(r.transactionTotal, -5000);
 });
 
 t('現金：帳戶空白且機構空白視為現金', () => {
@@ -107,6 +108,46 @@ t('getAccounts：初始餘額為 "200,000" 字串應解析', () => {
   const ss = { getSheetByName: () => sheet };
   const a = gs.getAccounts(ss);
   assert.strictEqual(a[0].initialBalance, 200000);
+});
+
+t('formatBalanceLine：信用卡顯示「未繳」', () => {
+  const line = gs.formatBalanceLine({ name: '永豐信用卡', type: '信用卡', currency: 'TWD', currentBalance: -0 });
+  assert.strictEqual(line, '永豐信用卡：未繳 $0');
+});
+
+t('formatBalanceLine：銀行帳戶一般顯示', () => {
+  const line = gs.formatBalanceLine({ name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 0 });
+  assert.strictEqual(line, '永豐大戶：$0');
+});
+
+t('formatBalanceLine：外幣顯示幣別與小數', () => {
+  const line = gs.formatBalanceLine({ name: '永豐外幣', type: '銀行', currency: 'USD', currentBalance: 0 });
+  assert.strictEqual(line, '永豐外幣：$1,858.62 USD');
+});
+
+t('buildAllBalancesReply：分區【資產】【信用卡】', () => {
+  const balances = [
+    { name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 0 },
+    { name: '永豐信用卡', type: '信用卡', currency: 'TWD', currentBalance: -0 },
+  ];
+  const reply = gs.buildAllBalancesReply(balances, '2026/09/06');
+  const expected = '💰 帳戶餘額一覽（2026/09/06）'
+    + '\n【資產】'
+    + '\n永豐大戶：$0'
+    + '\n【信用卡】'
+    + '\n永豐信用卡：未繳 $0'
+    + '\n共 2 個帳戶';
+  assert.strictEqual(reply, expected);
+});
+
+t('buildAllBalancesReply：無信用卡帳戶時省略該分區標題', () => {
+  const balances = [{ name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 0 }];
+  const reply = gs.buildAllBalancesReply(balances, '2026/09/06');
+  const expected = '💰 帳戶餘額一覽（2026/09/06）'
+    + '\n【資產】'
+    + '\n永豐大戶：$0'
+    + '\n共 1 個帳戶';
+  assert.strictEqual(reply, expected);
 });
 
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
