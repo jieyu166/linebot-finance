@@ -33,9 +33,11 @@ if (!apiKey) {
 
 const name = (process.argv[2] || '').replace(/\.txt$/, '');
 if (!name) {
-  console.log('用法：node test/prompt-live.js <fixture 名稱，如 sinopac-bank-2026-08>');
+  console.log('用法：node test/prompt-live.js <fixture 名稱，如 sinopac-bank-2026-08> [model 名稱，如 gpt-4o]');
   process.exit(1);
 }
+const modelArg = process.argv[3] || null;
+console.log('model: ' + (modelArg || 'gpt-4o-mini'));
 const fixturePath = path.join(__dirname, 'fixtures', name + '.txt');
 if (!fs.existsSync(fixturePath)) {
   console.log('找不到 fixture：' + fixturePath);
@@ -76,7 +78,11 @@ function curlFetch(url, options) {
 }
 
 const gs = loadGs(['SheetService.gs', 'TransferService.gs', 'Config.gs', 'OpenAIService.gs'], {
-  PropertiesService: { getScriptProperties: function() { return { getProperty: function(key) { return key === 'OPENAI_API_KEY' ? apiKey : null; } }; } },
+  PropertiesService: { getScriptProperties: function() { return { getProperty: function(key) {
+    if (key === 'OPENAI_API_KEY') { return apiKey; }
+    if (key === 'OPENAI_MODEL') { return modelArg; }
+    return null;
+  } }; } },
   UrlFetchApp: { fetch: curlFetch }
 });
 
