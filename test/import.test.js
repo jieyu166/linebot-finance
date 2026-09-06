@@ -361,5 +361,57 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
   });
 }
 
+// ---- previewMigrations / runMigrations（Config.gs）----
+
+{
+  const gs3 = loadGs(['SheetService.gs', 'TransferService.gs', 'Config.gs']);
+
+  t('migrateCreditCardRows：未傳 toAccount（編輯器直接執行無參數的情境）拋出提示錯誤', () => {
+    assert.throws(() => gs3.migrateCreditCardRows(undefined, undefined), /previewMigrations/);
+  });
+
+  function migAcctRow(name, institution, type, debitAccount) {
+    return [name, institution, 'TWD', 0, '', '', true, type || '', debitAccount || '', ''];
+  }
+
+  function buildFullMigrateFixture() {
+    const txSheet = fakeSheet([
+      txRow('2026/03/07', '第一銀行', '一銀', '支出', '購物', '南紡', '', 1901, 'TWD', 'a', 'PDF匯入')
+    ]);
+    const acctSheet = fakeSheet([
+      migAcctRow('一銀', '第一銀行', '銀行', ''),
+      migAcctRow('一銀信用卡', '第一銀行', '信用卡', '一銀'),
+      migAcctRow('國泰', '國泰銀行', '銀行', ''),
+      migAcctRow('國泰信用卡', '國泰銀行', '信用卡', '國泰'),
+      migAcctRow('永豐大戶', '永豐銀行', '銀行', ''),
+      migAcctRow('永豐信用卡', '永豐銀行', '信用卡', '永豐大戶')
+    ]);
+    const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': acctSheet });
+    return { txSheet, acctSheet, ss };
+  }
+
+  t('previewMigrations：不拋錯，回傳每筆設定的 matched，且 dryRun 不搬移任何列', () => {
+    const { txSheet, ss } = buildFullMigrateFixture();
+    const results = gs3.previewMigrations(ss);
+    assert.strictEqual(results.length, 3);
+    const yiyin = results.find(r => r.name === '一銀');
+    assert.strictEqual(yiyin.matched, 1);
+    assert.strictEqual(yiyin.moved, 0);
+    const row1 = txSheet.getRange(2, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row1[2], '一銀');
+  });
+
+  t('runMigrations：正式搬移，一銀那筆列被移到一銀信用卡', () => {
+    const { txSheet, ss } = buildFullMigrateFixture();
+    const results = gs3.runMigrations(ss);
+    const yiyin = results.find(r => r.name === '一銀');
+    assert.strictEqual(yiyin.matched, 1);
+    assert.strictEqual(yiyin.moved, 1);
+    const row1 = txSheet.getRange(2, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row1[1], '第一銀行');
+    assert.strictEqual(row1[2], '一銀信用卡');
+  });
+}
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);

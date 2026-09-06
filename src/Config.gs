@@ -183,3 +183,61 @@ function backfillTransactionIds(ss) {
   Logger.log('已補 ' + count + ' 筆交易 ID');
   return count;
 }
+
+// ===== 舊資料搬移：在編輯器直接執行，不需參數 =====
+
+/** 信用卡舊資料搬移對照表：from 為目前誤記帳戶，to 為應搬移到的信用卡帳戶 */
+var MIGRATIONS = [
+  { name: '一銀',   from: '一銀',     to: '一銀信用卡',   start: '', end: '' },
+  { name: '國泰',   from: '國泰',     to: '國泰信用卡',   start: '', end: '' },
+  { name: '永豐',   from: '永豐大戶', to: '永豐信用卡',   start: '2026/01/01', end: '2026/12/31' }  // 依實際信用卡消費區間調整
+];
+
+/**
+ * 依 MIGRATIONS 逐一預覽搬移結果（不寫入），可直接在編輯器點選執行
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Array<Object>} 每筆設定的 { name, matched, moved }
+ */
+function previewMigrations(ss) {
+  var results = [];
+  MIGRATIONS.forEach(function(m) {
+    var r = migrateCreditCardRows(m.from, m.to, m.start, m.end, true, ss);
+    Logger.log('【' + m.name + '】符合 ' + r.matched + ' 筆');
+    results.push({ name: m.name, matched: r.matched, moved: r.moved });
+  });
+  return results;
+}
+
+/**
+ * 依 MIGRATIONS 逐一正式搬移（寫入試算表），可直接在編輯器點選執行
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Array<Object>} 每筆設定的 { name, matched, moved }
+ */
+function runMigrations(ss) {
+  var results = [];
+  MIGRATIONS.forEach(function(m) {
+    var r = migrateCreditCardRows(m.from, m.to, m.start, m.end, false, ss);
+    Logger.log('【' + m.name + '】已搬移 ' + r.moved + ' 筆');
+    results.push({ name: m.name, matched: r.matched, moved: r.moved });
+  });
+  return results;
+}
+
+/**
+ * 預覽既有「繳信用卡」未配對列，可直接在編輯器點選執行
+ * @returns {Object} { paired, created, details[] }
+ */
+function previewCreditCardPairing() {
+  return pairExistingCreditCardPayments(true);
+}
+
+/**
+ * 正式對既有「繳信用卡」未配對列補跑自動配對，可直接在編輯器點選執行
+ * @returns {Object} { paired, created, details[] }
+ */
+function runCreditCardPairing() {
+  var result = pairExistingCreditCardPayments(false);
+  Logger.log('paired: ' + result.paired + '，created: ' + result.created);
+  (result.details || []).forEach(function(d) { Logger.log(d); });
+  return result;
+}
