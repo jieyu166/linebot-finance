@@ -7,3 +7,4 @@ openspec/.vector-search.db*
 .cursorrules
 .env
 *.log
+test/fixtures/
