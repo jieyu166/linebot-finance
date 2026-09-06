@@ -397,6 +397,7 @@ function dedupeAgainstSheet(transactions, ss) {
  * @returns {Object} { matched, moved, rows[] }
  */
 function migrateCreditCardRows(fromAccount, toAccount, startDate, endDate, dryRun, ss) {
+  if (!toAccount) { throw new Error('請用 previewMigrations() / runMigrations() 執行，或傳入 fromAccount、toAccount 參數'); }
   dryRun = dryRun !== false;
   ss = getSpreadsheet(ss);
   var target = findAccountByName(getAccounts(ss), toAccount);

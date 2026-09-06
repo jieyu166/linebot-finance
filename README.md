@@ -180,8 +180,8 @@ openspec/
 2. 執行 initializeSheets()（補標題、預算表、收入分類「轉帳」、缺少的帳戶）
 3. 執行 backfillTransactionIds()
 4. 在「帳戶管理」填帳戶類型、扣款帳戶、帳號識別、初始餘額（信用卡填上期未繳金額的負數，初始日期填該期結帳日）
-5. 舊資料搬移：先 migrateCreditCardRows('一銀','一銀信用卡','','',true) 預覽，確認後改 dryRun=false 執行；國泰同理；永豐信用卡依月份區間指定
-6. 執行 pairExistingCreditCardPayments(false) 補配對既有繳卡費
+5. 執行 previewMigrations() 看 Logger 預覽（搬移對照表在 Config.gs 的 MIGRATIONS，永豐的日期區間請先改成實際信用卡消費區間）；確認後執行 runMigrations()。
+6. 執行 previewCreditCardPairing() 預覽，再執行 runCreditCardPairing() 補配對。
 7. 在 LINE 傳「餘額」核對
 ```
 
