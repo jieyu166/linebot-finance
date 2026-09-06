@@ -78,16 +78,15 @@ function handleTextMessage(event) {
     var expenseCategories = getCategories('支出分類', ss);
     var incomeCategories = getCategories('收入分類', ss);
     var accounts = getAccounts(ss);
-    var accountNames = accounts.map(function(account) { return account.name; });
 
     // 偵測是否為銀行帳單文字（多行、含帳單關鍵字）
     if (isBankStatement(userMessage)) {
-      handleBankStatementText(replyToken, userMessage, expenseCategories, incomeCategories, accountNames, ss);
+      handleBankStatementText(replyToken, userMessage, expenseCategories, incomeCategories, accounts, ss);
       return;
     }
 
     // 一般文字記帳流程
-    var parsed = parseWithOpenAI(userMessage, expenseCategories, incomeCategories, accountNames);
+    var parsed = parseWithOpenAI(userMessage, expenseCategories, incomeCategories, accounts);
 
     // 驗證解析結果
     if (!parsed || !parsed.amount || parsed.amount <= 0 || !parsed.category || !parsed.type) {
@@ -165,17 +164,9 @@ function handleFileMessage(event) {
       return;
     }
 
-    // 偵測 OCR 格式損壞（中國信託等銀行 PDF 常見問題）
-    var cleanChars = text.replace(/[\s\d\.\,\/\-\+\*\(\)]/g, '');
-    var totalLen = cleanChars.length;
-    var garbledCount = 0;
-    for (var j = 0; j < cleanChars.length; j++) {
-      var code = cleanChars.charCodeAt(j);
-      if (code < 0x4E00 && code > 127 && !/[a-zA-Z]/.test(cleanChars[j])) {
-        garbledCount++;
-      }
-    }
-    if (totalLen > 0 && garbledCount / totalLen > 0.3) {
+    // 逐行過濾 OCR 亂碼行（中國信託等銀行 PDF 常見問題），只在全部被濾掉時才放棄
+    text = stripGarbledLines(text);
+    if (!text.trim()) {
       replyToLine(replyToken, '此帳單格式無法正確辨識，請嘗試其他方式提供明細。');
       return;
     }
@@ -185,10 +176,9 @@ function handleFileMessage(event) {
     var expenseCategories = getCategories('支出分類', ss);
     var incomeCategories = getCategories('收入分類', ss);
     var accounts = getAccounts(ss);
-    var accountNames = accounts.map(function(account) { return account.name; });
 
     // 呼叫 OpenAI 批次解析
-    var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accountNames);
+    var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts);
 
     if (!result.transactions || result.transactions.length === 0) {
       replyToLine(replyToken, '無法從此 PDF 中解析出交易紀錄，請確認是否為銀行帳單。');
@@ -394,11 +384,11 @@ function handleBalanceCommand(replyToken, accountName, ss) {
  * @param {string} text - 帳單文字
  * @param {string[]} expenseCategories
  * @param {string[]} incomeCategories
- * @param {string[]} accountNames
+ * @param {Object[]} accounts - 帳戶物件陣列
  */
-function handleBankStatementText(replyToken, text, expenseCategories, incomeCategories, accountNames, ss) {
+function handleBankStatementText(replyToken, text, expenseCategories, incomeCategories, accounts, ss) {
   // 呼叫批次解析（共用 PDF 的 prompt）
-  var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accountNames);
+  var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts);
 
   if (!result.transactions || result.transactions.length === 0) {
     replyToLine(replyToken, '無法從文字中解析出交易紀錄。\n請確認是否為銀行帳單明細，或嘗試傳送 PDF 檔案。');
