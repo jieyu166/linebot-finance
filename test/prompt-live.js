@@ -62,7 +62,12 @@ function curlFetch(url, options) {
     'show-error'
   ].join('\n'), 'utf8');
 
-  const code = execSync('curl -K "' + fwd(cfgFile) + '" -w "%{http_code}"', { encoding: 'utf8' }).trim();
+  let code;
+  try {
+    code = execSync('curl -K "' + fwd(cfgFile) + '" -w "%{http_code}"', { encoding: 'utf8' }).trim();
+  } finally {
+    fs.unlinkSync(cfgFile); // config 內含金鑰，用完立刻刪除
+  }
   const body = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf8') : '';
   return {
     getResponseCode: function() { return Number(code); },
