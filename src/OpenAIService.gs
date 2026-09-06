@@ -71,7 +71,7 @@ function parseWithOpenAI(message, expenseCategories, incomeCategories, accounts)
   var systemPrompt = buildSystemPrompt(expenseCategories, incomeCategories, accounts);
 
   var payload = {
-    model: 'gpt-4o-mini',
+    model: getConfig('OPENAI_MODEL') || 'gpt-4.1-mini',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: message }
@@ -670,7 +670,10 @@ function detectCardAccountFromText(text, accounts, currency) {
 }
 
 /**
- * 比對信用卡帳單解析總額與 statementTotals（本期新增款項），差異 ≥ 1 時寫入 parsed.notes
+ * 比對信用卡帳單解析總額與 statementTotals（本期新增款項）：
+ * 銀行間「本期新增款項」的定義不一致——玉山是淨額（支出−收入，回饋已扣除），
+ * 一銀是毛額（僅支出，回饋另列）。因此毛額 sum(支出) 或淨額 sum(支出)−sum(收入)
+ * 任一與 newCharges 相符（差 < 1）即視為通過；兩者都不符才寫入 parsed.notes。
  * @param {Object} parsed - { statementType, statementTotals, notes, transactions }
  * @returns {Object} parsed
  */
@@ -679,17 +682,21 @@ function checkStatementTotals(parsed) {
   var sums = {};
   (parsed.transactions || []).forEach(function(tx) {
     var cur = String(tx.currency || 'TWD').toUpperCase();
-    sums[cur] = sums[cur] || 0;
-    sums[cur] += (tx.type === '支出' ? 1 : -1) * (Number(tx.amount) || 0);
+    sums[cur] = sums[cur] || { expense: 0, income: 0 };
+    if (tx.type === '支出') { sums[cur].expense += (Number(tx.amount) || 0); }
+    else { sums[cur].income += (Number(tx.amount) || 0); }
   });
   parsed.notes = parsed.notes || [];
   parsed.statementTotals.forEach(function(st) {
     var cur = String(st.currency || 'TWD').toUpperCase();
-    var got = Math.round((sums[cur] || 0) * 100) / 100;
+    var s = sums[cur] || { expense: 0, income: 0 };
+    var gross = Math.round(s.expense * 100) / 100;
+    var net = Math.round((s.expense - s.income) * 100) / 100;
     var expected = Number(st.newCharges) || 0;
-    var diff = Math.round((got - expected) * 100) / 100;
-    if (Math.abs(diff) >= 1) {
-      parsed.notes.push((cur === 'TWD' ? '臺幣' : cur) + '解析合計 ' + got + ' 與帳單本期新增款項 ' + expected + ' 不符（差 ' + diff + '），請核對');
+    var grossDiff = Math.abs(Math.round((gross - expected) * 100) / 100);
+    var netDiff = Math.abs(Math.round((net - expected) * 100) / 100);
+    if (grossDiff >= 1 && netDiff >= 1) {
+      parsed.notes.push((cur === 'TWD' ? '臺幣' : cur) + '解析合計 ' + gross + '（毛額）/ ' + net + '（淨額）與帳單本期新增款項 ' + expected + ' 不符，請核對');
     }
   });
   return parsed;
@@ -708,7 +715,7 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts)
   var url = 'https://api.openai.com/v1/chat/completions';
 
   var systemPrompt = buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts);
-  var model = getConfig('OPENAI_MODEL') || 'gpt-4o-mini';
+  var model = getConfig('OPENAI_MODEL') || 'gpt-4.1-mini';
 
   var payload = {
     model: model,

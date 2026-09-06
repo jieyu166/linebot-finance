@@ -412,20 +412,7 @@ t('detectCardAccountFromText：無任何命中回傳 null', () => {
 
 // ---------- checkStatementTotals ----------
 
-t('checkStatementTotals：合計不符時記錄 notes', () => {
-  const parsed = {
-    statementType: '信用卡', notes: [],
-    statementTotals: [{ currency: 'TWD', newCharges: 0 }],
-    transactions: [
-      tx({ type: '支出', currency: 'TWD', amount: 100 }),
-      tx({ type: '支出', currency: 'TWD', amount: 200 })
-    ]
-  };
-  gs.checkStatementTotals(parsed);
-  assert.ok(parsed.notes.some(function(n) { return /不符/.test(n); }), parsed.notes.join('|'));
-});
-
-t('checkStatementTotals：合計相符（差 < 1）不記錄 notes', () => {
+t('checkStatementTotals：毛額 sum(支出) 相符（一銀式，無回饋）時不記錄 notes', () => {
   const parsed = {
     statementType: '信用卡', notes: [],
     statementTotals: [{ currency: 'TWD', newCharges: 300 }],
@@ -436,6 +423,35 @@ t('checkStatementTotals：合計相符（差 < 1）不記錄 notes', () => {
   };
   gs.checkStatementTotals(parsed);
   assert.strictEqual(parsed.notes.length, 0);
+});
+
+t('checkStatementTotals：淨額 sum(支出)−sum(收入) 相符（玉山式，回饋已扣除）時不記錄 notes', () => {
+  const parsed = {
+    statementType: '信用卡', notes: [],
+    // 毛額 300 與 newCharges 250 不符，但淨額 300-50=250 相符 → 應通過
+    statementTotals: [{ currency: 'TWD', newCharges: 250 }],
+    transactions: [
+      tx({ type: '支出', currency: 'TWD', amount: 100 }),
+      tx({ type: '支出', currency: 'TWD', amount: 200 }),
+      tx({ type: '收入', currency: 'TWD', amount: 50 })
+    ]
+  };
+  gs.checkStatementTotals(parsed);
+  assert.strictEqual(parsed.notes.length, 0);
+});
+
+t('checkStatementTotals：毛額與淨額皆不符時記錄 notes（含毛額/淨額字樣）', () => {
+  const parsed = {
+    statementType: '信用卡', notes: [],
+    statementTotals: [{ currency: 'TWD', newCharges: 0 }],
+    transactions: [
+      tx({ type: '支出', currency: 'TWD', amount: 100 }),
+      tx({ type: '支出', currency: 'TWD', amount: 200 }),
+      tx({ type: '收入', currency: 'TWD', amount: 50 })
+    ]
+  };
+  gs.checkStatementTotals(parsed);
+  assert.ok(parsed.notes.some(function(n) { return /不符/.test(n) && /毛額/.test(n) && /淨額/.test(n); }), parsed.notes.join('|'));
 });
 
 process.exit(failed === 0 ? 0 : 1);

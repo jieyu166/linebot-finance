@@ -37,7 +37,7 @@ if (!name) {
   process.exit(1);
 }
 const modelArg = process.argv[3] || null;
-console.log('model: ' + (modelArg || 'gpt-4o-mini'));
+console.log('model: ' + (modelArg || 'gpt-4.1-mini'));
 const fixturePath = path.join(__dirname, 'fixtures', name + '.txt');
 if (!fs.existsSync(fixturePath)) {
   console.log('找不到 fixture：' + fixturePath);
