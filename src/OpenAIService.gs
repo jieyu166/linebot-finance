@@ -300,10 +300,12 @@ function findAccountByTypeAndBank(accounts, type, bank, currency) {
 }
 
 /**
- * 匯入後處理：帳號分流、信用卡／證券帳單強制對應類型帳戶、同帳戶內轉丟棄
+ * 匯入後處理：帳號分流、信用卡／證券帳單強制對應類型帳戶、同帳戶內轉丟棄。
+ * 銀行帳戶類型的交易若帳號無 hint 命中，改依「銀行＋幣別」fallback 對應唯一帳戶
+ * （命中則記入 parsed.fallbackAccountNumbers；仍無法唯一判定才維持丟棄＋unmatchedAccountNumbers）
  * @param {Object} parsed - OpenAI 解析結果
  * @param {Object[]} accounts - 帳戶清單
- * @returns {{transactions: Object[], unmatchedAccountNumbers: string[], intraAccountSkipped: Object[]}}
+ * @returns {{transactions: Object[], unmatchedAccountNumbers: string[], intraAccountSkipped: Object[], fallbackAccountNumbers: string[]}}
  */
 function resolveImportedAccounts(parsed, accounts) {
   var out = [], unmatched = {}, skipped = [], st = parsed.statementType || '';
@@ -313,6 +315,16 @@ function resolveImportedAccounts(parsed, accounts) {
     if (st === '證券') { tx.accountNumber = ''; }
     if (tx.accountNumber) {
       acct = findAccountByNumber(accounts, tx.accountNumber);
+      if (!acct && st === '銀行帳戶') {
+        var fallbackAcct = findAccountByTypeAndBank(accounts, '銀行', parsed.bank || tx.institution, currency);
+        if (fallbackAcct) {
+          acct = fallbackAcct;
+          parsed.fallbackAccountNumbers = parsed.fallbackAccountNumbers || [];
+          if (parsed.fallbackAccountNumbers.indexOf(tx.accountNumber) < 0) {
+            parsed.fallbackAccountNumbers.push(tx.accountNumber);
+          }
+        }
+      }
       if (!acct) { unmatched[tx.accountNumber] = true; return; }
       if (tx.category === '轉帳') {
         var cp = matchCounterpartyAccount(tx.description, accounts);
@@ -341,7 +353,12 @@ function resolveImportedAccounts(parsed, accounts) {
     }
     out.push(tx);
   });
-  return { transactions: out, unmatchedAccountNumbers: Object.keys(unmatched), intraAccountSkipped: skipped };
+  return {
+    transactions: out,
+    unmatchedAccountNumbers: Object.keys(unmatched),
+    intraAccountSkipped: skipped,
+    fallbackAccountNumbers: parsed.fallbackAccountNumbers || []
+  };
 }
 
 /**
@@ -781,6 +798,7 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts)
   parsed.transactions = resolved.transactions;
   parsed.unmatchedAccountNumbers = resolved.unmatchedAccountNumbers;
   parsed.intraAccountSkipped = resolved.intraAccountSkipped;
+  parsed.fallbackAccountNumbers = resolved.fallbackAccountNumbers;
   dropSettlementBuyRows(parsed, accounts);
   normalizeCategories(parsed, expenseCategories, incomeCategories);
   checkStatementTotals(parsed);

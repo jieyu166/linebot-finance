@@ -206,7 +206,7 @@ function handleFileMessage(event) {
     var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts);
 
     if (!result.transactions || result.transactions.length === 0) {
-      replyToLine(replyToken, '無法從此 PDF 中解析出交易紀錄，請確認是否為銀行帳單。');
+      replyToLine(replyToken, buildEmptyImportReply(result, 'PDF'));
       return;
     }
 
@@ -416,7 +416,7 @@ function handleBankStatementText(replyToken, text, expenseCategories, incomeCate
   var result = parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts);
 
   if (!result.transactions || result.transactions.length === 0) {
-    replyToLine(replyToken, '無法從文字中解析出交易紀錄。\n請確認是否為銀行帳單明細，或嘗試傳送 PDF 檔案。');
+    replyToLine(replyToken, buildEmptyImportReply(result, '文字'));
     return;
   }
 
@@ -514,6 +514,19 @@ function buildImportSummary(result, source, outcome) {
   if (result.unmatchedAccountNumbers && result.unmatchedAccountNumbers.length > 0) {
     replyText += '  未對應帳號：' + result.unmatchedAccountNumbers.join('、') + '（請在帳戶管理 J 欄填帳號識別）\n';
   }
+  if (result.fallbackAccountNumbers && result.fallbackAccountNumbers.length > 0) {
+    var fallbackSet = {};
+    result.fallbackAccountNumbers.forEach(function(n) { fallbackSet[n] = true; });
+    var fallbackByAccount = {}, fallbackOrder = [];
+    (result.transactions || []).forEach(function(t) {
+      if (!fallbackSet[t.accountNumber]) { return; }
+      if (!fallbackByAccount[t.account]) { fallbackByAccount[t.account] = []; fallbackOrder.push(t.account); }
+      if (fallbackByAccount[t.account].indexOf(t.accountNumber) < 0) { fallbackByAccount[t.account].push(t.accountNumber); }
+    });
+    fallbackOrder.forEach(function(name) {
+      replyText += '  未填帳號識別，已依銀行歸到「' + name + '」：' + fallbackByAccount[name].join('、') + '（建議在帳戶管理 J 欄填入）\n';
+    });
+  }
   if (result.intraAccountSkipped && result.intraAccountSkipped.length > 0) {
     replyText += '  同帳戶內轉已跳過 ' + result.intraAccountSkipped.length + ' 筆\n';
   }
@@ -529,4 +542,14 @@ function buildImportSummary(result, source, outcome) {
   }
 
   return replyText.trim();
+}
+
+/**
+ * 建構「無法解析出交易紀錄」時的回覆：仍附上未對應帳號／跳過／備註等診斷資訊
+ * @param {Object} result - parsePdfWithOpenAI 結果（transactions 為空陣列）
+ * @param {string} source - 來源（'PDF' 或 '文字'）
+ * @returns {string} 格式化的回覆訊息
+ */
+function buildEmptyImportReply(result, source) {
+  return ('無法從此帳單解析出交易紀錄。\n' + buildImportSummary(result, source, null)).trim();
 }
