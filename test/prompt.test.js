@@ -80,6 +80,22 @@ t('buildPdfSystemPrompt 含帳單類型、帳戶描述、回饋入帳戶、餘�
   assert.ok(p.indexOf('中信') >= 0, '缺中信 tab 格式範例');
 });
 
+t('buildPdfSystemPrompt 含 balance/counterparty/statementTotals schema 與新規則字句', () => {
+  const p = gs.buildPdfSystemPrompt(EXP, INC, accounts());
+  assert.ok(p.indexOf('"balance"') >= 0, '缺 balance 欄位 schema');
+  assert.ok(p.indexOf('"counterparty"') >= 0, '缺 counterparty 欄位 schema');
+  assert.ok(p.indexOf('statementTotals') >= 0, '缺 statementTotals 欄位 schema');
+  assert.ok(p.indexOf('newCharges') >= 0, '缺 newCharges 欄位 schema');
+  assert.ok(p.indexOf('小計') >= 0, '缺多卡號小計規則');
+  assert.ok(p.indexOf('同一天同商店同金額') >= 0, '缺同天同店同額多筆保留規則');
+  assert.ok(p.indexOf('分頁') >= 0, '缺分頁去重規則');
+  assert.ok(p.indexOf('禁止自創') >= 0, '缺分類禁止自創規則');
+  assert.ok(p.indexOf('UBear') >= 0 && p.indexOf('玉山') >= 0, '缺 UBear→玉山銀行提示');
+  assert.ok(p.indexOf('Cube') >= 0 && p.indexOf('國泰') >= 0, '缺 Cube→國泰提示');
+  assert.ok(p.indexOf('Costco') >= 0 && p.indexOf('富邦') >= 0, '缺 Costco→富邦提示');
+  assert.ok(p.indexOf('Richart') >= 0 && p.indexOf('台新') >= 0, '缺 Richart→台新提示');
+});
+
 // ---------- stripGarbledLines ----------
 
 t('stripGarbledLines 去掉亂碼行、保留正常行與空行', () => {

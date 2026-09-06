@@ -154,12 +154,24 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
 
     + '## PDF 分頁去重\n'
     + '部分銀行 PDF 因分頁導致同一區塊重複出現（如永豐信用卡臺幣區塊出現兩次）。\n'
-    + '請比對交易日期+金額+品項，去除完全重複的交易，每筆只保留一次。\n\n'
+    + '請比對交易日期+金額+品項，去除完全重複的交易，每筆只保留一次；只有整段文字完全重複（分頁造成）才去重。\n'
+    + '同一天同商店同金額的多筆交易是真實發生的多筆交易，全部保留，不要因為日期金額相同就當成重複；每筆國外交易服務費也各自獨立記一筆，不可合併或省略。\n\n'
+
+    + '## 信用卡多卡號區塊與雙幣帳單\n'
+    + '信用卡帳單可能包含多個卡號區塊（同一帳戶不同卡片，或本人卡＋附卡），每個區塊以「小計」結尾；看到「小計」後不可停止，必須繼續解析下一個卡號區塊，直到整份帳單出現「總計」或「本期應繳總金額」為止，不可只解析第一個小計前的區塊。\n'
+    + '雙幣信用卡帳單（同時有臺幣與美金消費）：美元區塊的交易務必解析並以 currency:"USD" 輸出，不可只解析臺幣區塊、遺漏美元區塊。\n'
+    + '含外幣折算資訊的行（例如「Google Pikmin Bloom W USA Mountain View 07/31 TWD 660 TWD 660」，前一個金額是原幣別、後一個是繳款幣別折算金額）：amount 一律取「繳款幣別」的折算金額，不要取原幣別金額。\n'
+    + '商店名稱跨多行顯示時，請合併成一個完整名稱再輸出，不要只取其中一行或拆成兩筆。\n\n'
 
     + '## 方向判斷（支出／收入）\n'
     + '1. 若文字是以 tab 分隔的表格（例如從網銀網頁複製貼上），直接依「支出」欄與「存入」欄所在位置判斷：支出欄有值→type:支出；存入欄有值→type:收入。\n'
     + '2. 若欄位在 PDF 擷取時黏在一起、無法分辨金額屬於支出或存入，改用「餘額」欄判斷：本列餘額小於上一列餘額→支出；大於上一列餘額→收入；金額取兩列餘額差的絕對值。\n'
+    + '   即使方向不確定，也要照常輸出這一列（先填你判斷的 type），系統會依 balance 欄再次核對修正，不要因為方向不確定就跳過整列。\n'
     + '3. 轉帳列的對方帳號請原文保留在 description 中（例如「網路非約轉帳 8080000015977221」），不要刪除數字。\n\n'
+
+    + '## balance／counterparty 欄位（銀行帳戶明細必填）\n'
+    + '"balance" 欄位：這一列交易完成後的餘額／結餘數字（不含千分位逗號），銀行帳戶明細每一列都要填；信用卡帳單、證券對帳單沒有餘額欄則填 null。\n'
+    + '"counterparty" 欄位：這一列摘要／備註中的對方帳號、轉入帳戶或原始備註文字（含數字），原文照抄，無則填空字串 ""；系統會用這個欄位補到 description 裡，不需要你手動重複附加。\n\n'
 
     + '## 交易分類規則\n'
     + '1. 一般消費：根據商店名稱判斷最適合的支出分類。\n'
@@ -185,7 +197,8 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '11. 連結帳戶交易、連結帳戶扣款、線上支付、電子支付，若無明確商店或用途可判斷，多數先歸為 type:支出, category:飲食。\n'
     + '12. 發票獎金：→ type:收入, category:獎金。\n'
     + '13. 「連加*」前綴為感應支付消費，去除前綴後保留商店名稱。\n'
-    + '14. LINE Bank 注意：主帳戶的「刷卡交易」和簽帳金融卡明細是同一筆，只記一次（記簽帳金融卡明細）。\n\n'
+    + '14. LINE Bank 注意：主帳戶的「刷卡交易」和簽帳金融卡明細是同一筆，只記一次（記簽帳金融卡明細）。\n'
+    + '15. "category" 只能填「支出分類清單」或「收入分類清單」中列出的字串，禁止自創清單以外的分類名稱（例如清單沒有「娛樂」就不可以填「娛樂」，要選清單中最接近的，例如「休閒」）。\n\n'
 
     + '## 帳戶清單\n'
     + describeAccounts(accounts) + '\n'
@@ -193,7 +206,8 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '- 信用卡帳單（statementType=信用卡）：選同機構且類型=信用卡、幣別相符的帳戶；雙幣卡帳單的美元區塊要用 USD 的信用卡帳戶。\n'
     + '- 銀行帳戶明細（statementType=銀行帳戶）：依該段落上方的「帳號」行，把帳號原文（含 * 遮罩）填入該列的 "accountNumber" 欄位，例如 "198-01*-**10443-*"；一份 PDF 有多個帳號段落時，每列要填自己所屬段落的帳號。\n'
     + '- 證券對帳單（statementType=證券）：選同機構且類型=證券的帳戶。\n'
-    + '- 同一份信用卡帳單有多張卡但屬同一個帳戶時，請把卡號末四碼寫入 description（例如「南紡購物中心 (7142)」）。\n\n'
+    + '- 同一份信用卡帳單有多張卡但屬同一個帳戶時，請把卡號末四碼寫入 description（例如「南紡購物中心 (7142)」）。\n'
+    + '- 信用卡帳單銀行判斷提示（帳單上常見卡片別名 → 所屬銀行）：UBear 卡／U Bear 卡 → 玉山銀行；Cube 卡 → 國泰銀行；Costco 卡 → 富邦銀行；Line 卡 → 中國信託；綠活卡／iLEO 卡 → 第一銀行；大戶卡／幣倍卡／大衛卡 → 永豐銀行；Richart 卡 → 台新銀行。\n\n'
 
     + '## 支出分類清單\n'
     + expenseCategories.join('、') + '\n\n'
@@ -201,7 +215,7 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + incomeCategories.join('、') + '\n\n'
 
     + '## 輸出格式（嚴格 JSON）\n'
-    + '{"bank":"銀行名稱","statementType":"信用卡或銀行帳戶或證券","transactions":[{"date":"yyyy/MM/dd","type":"支出或收入","category":"分類名稱","item":"品項","description":"明細描述","institution":"金融機構","account":"帳戶清單中的帳戶名稱或空字串","accountNumber":"銀行帳戶明細的帳號原文，其他情況填空字串","currency":"幣別","amount":金額正數}],"skipped":跳過的行數}\n\n'
+    + '{"bank":"銀行名稱","statementType":"信用卡或銀行帳戶或證券","transactions":[{"date":"yyyy/MM/dd","type":"支出或收入","category":"分類名稱","item":"品項","description":"明細描述","institution":"金融機構","account":"帳戶清單中的帳戶名稱或空字串","accountNumber":"銀行帳戶明細的帳號原文，其他情況填空字串","currency":"幣別","amount":金額正數,"balance":這筆交易後的餘額數字或null,"counterparty":"對方帳號／轉入帳戶／備註原文，無則空字串"}],"skipped":跳過的行數,"statementTotals":[{"currency":"TWD","newCharges":本期新增款項數字}]（僅信用卡帳單填，其他帳單類型省略此欄位）}\n\n'
 
     + '## 範例\n\n'
 
@@ -211,7 +225,8 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '03/13 03/17 國外交易手續費(670.00 TWD) 10 7142\n'
     + '04/02 04/02 現金回饋-iLEO信用卡 -58 7142\n'
     + '03/09 03/09 永豐自扣已入帳,謝謝! -3,159\n'
-    + '輸出：{"bank":"第一銀行","statementType":"信用卡","transactions":[{"date":"2026/03/07","type":"支出","category":"購物","item":"南紡購物中心","description":"連加*南紡購物中心 (7142)","institution":"第一銀行","account":"一銀信用卡","accountNumber":"","currency":"TWD","amount":1901},{"date":"2026/03/13","type":"支出","category":"手續費","item":"國外交易手續費","description":"國外交易手續費(670.00 TWD) (7142)","institution":"第一銀行","account":"一銀信用卡","accountNumber":"","currency":"TWD","amount":10},{"date":"2026/04/02","type":"收入","category":"回饋","item":"現金回饋","description":"現金回饋-iLEO信用卡 (7142)","institution":"第一銀行","account":"一銀信用卡","accountNumber":"","currency":"TWD","amount":58}],"skipped":2}\n\n'
+    + '小計 1,911\n本期應繳總金額 1,911\n'
+    + '輸出：{"bank":"第一銀行","statementType":"信用卡","transactions":[{"date":"2026/03/07","type":"支出","category":"購物","item":"南紡購物中心","description":"連加*南紡購物中心 (7142)","institution":"第一銀行","account":"一銀信用卡","accountNumber":"","currency":"TWD","amount":1901,"balance":null,"counterparty":""},{"date":"2026/03/13","type":"支出","category":"手續費","item":"國外交易手續費","description":"國外交易手續費(670.00 TWD) (7142)","institution":"第一銀行","account":"一銀信用卡","accountNumber":"","currency":"TWD","amount":10,"balance":null,"counterparty":""},{"date":"2026/04/02","type":"收入","category":"回饋","item":"現金回饋","description":"現金回饋-iLEO信用卡 (7142)","institution":"第一銀行","account":"一銀信用卡","accountNumber":"","currency":"TWD","amount":58,"balance":null,"counterparty":""}],"skipped":2,"statementTotals":[{"currency":"TWD","newCharges":1911}]}\n\n'
 
     + '### 範例2：永豐銀行帳戶明細\n'
     + '輸入：帳號:198-01*-**10443-*(新臺幣)\n'
@@ -220,12 +235,12 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '2026/03/12 房貸還本 30,000 209,766\n'
     + '2026/03/15 連結帳戶交易 180 209,586\n'
     + '2026/03/21 利息存入 356 339,455\n'
-    + '輸出：{"bank":"永豐銀行","statementType":"銀行帳戶","transactions":[{"date":"2026/03/02","type":"收入","category":"回饋","item":"大戶回饋","description":"大戶回饋","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":607},{"date":"2026/03/09","type":"支出","category":"繳信用卡","item":"永豐卡費","description":"永豐卡費扣繳","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":21207},{"date":"2026/03/12","type":"支出","category":"貸款","item":"房貸還本","description":"房貸還本","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":30000},{"date":"2026/03/15","type":"支出","category":"飲食","item":"連結帳戶交易","description":"連結帳戶交易","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":180},{"date":"2026/03/21","type":"收入","category":"利息","item":"利息存入","description":"利息存入","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":356}],"skipped":0}\n\n'
+    + '輸出：{"bank":"永豐銀行","statementType":"銀行帳戶","transactions":[{"date":"2026/03/02","type":"收入","category":"回饋","item":"大戶回饋","description":"大戶回饋","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":607,"balance":210973,"counterparty":""},{"date":"2026/03/09","type":"支出","category":"繳信用卡","item":"永豐卡費","description":"永豐卡費扣繳","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":21207,"balance":239766,"counterparty":""},{"date":"2026/03/12","type":"支出","category":"貸款","item":"房貸還本","description":"房貸還本","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":30000,"balance":209766,"counterparty":""},{"date":"2026/03/15","type":"支出","category":"飲食","item":"連結帳戶交易","description":"連結帳戶交易","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":180,"balance":209586,"counterparty":""},{"date":"2026/03/21","type":"收入","category":"利息","item":"利息存入","description":"利息存入","institution":"永豐銀行","account":"永豐大戶","accountNumber":"198-01*-**10443-*","currency":"TWD","amount":356,"balance":339455,"counterparty":""}],"skipped":0}\n\n'
 
     + '### 範例3：永豐證券\n'
     + '輸入：2026/03/03 普賣 國產 1,000 39.5500 39,550 56 118 39,376\n'
     + '2026/03/06 普買 台積電 5 1,892.0000 9,460 1 9,461\n'
-    + '輸出：{"bank":"永豐證券","statementType":"證券","transactions":[{"date":"2026/03/03","type":"收入","category":"投資獲利","item":"國產","description":"普賣 國產 1,000股","institution":"永豐銀行","account":"永豐證券","accountNumber":"","currency":"TWD","amount":39376},{"date":"2026/03/06","type":"支出","category":"投資","item":"台積電","description":"普買 台積電 5股","institution":"永豐銀行","account":"永豐證券","accountNumber":"","currency":"TWD","amount":9461}],"skipped":0}\n\n'
+    + '輸出：{"bank":"永豐證券","statementType":"證券","transactions":[{"date":"2026/03/03","type":"收入","category":"投資獲利","item":"國產","description":"普賣 國產 1,000股","institution":"永豐銀行","account":"永豐證券","accountNumber":"","currency":"TWD","amount":39376,"balance":null,"counterparty":""},{"date":"2026/03/06","type":"支出","category":"投資","item":"台積電","description":"普買 台積電 5股","institution":"永豐銀行","account":"永豐證券","accountNumber":"","currency":"TWD","amount":9461,"balance":null,"counterparty":""}],"skipped":0}\n\n'
 
     + '### 範例4：中國信託帳戶明細（網頁複製，tab 分隔）\n'
     + '輸入：日期\t摘要\t支出\t存入\t餘額\t備註\n'
@@ -233,7 +248,7 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '2026/08/07\t現金提\t20,000\t\t165,000\tATM提款\n'
     + '2026/08/12\t中信卡\t8,432\t\t156,568\t信用卡自動扣繳\n'
     + '2026/08/20\t跨行轉\t5,000\t\t151,568\t轉出 8220001234567\n'
-    + '輸出：{"bank":"中國信託","statementType":"銀行帳戶","transactions":[{"date":"2026/08/05","type":"收入","category":"薪資","item":"薪資","description":"電匯 醫療財團法人","institution":"中國信託","account":"中信","accountNumber":"","currency":"TWD","amount":120000},{"date":"2026/08/07","type":"支出","category":"轉帳","item":"現金提","description":"ATM提款","institution":"中國信託","account":"中信","accountNumber":"","currency":"TWD","amount":20000},{"date":"2026/08/12","type":"支出","category":"繳信用卡","item":"中信卡","description":"信用卡自動扣繳","institution":"中國信託","account":"中信","accountNumber":"","currency":"TWD","amount":8432},{"date":"2026/08/20","type":"支出","category":"轉帳","item":"跨行轉","description":"轉出 8220001234567","institution":"中國信託","account":"中信","accountNumber":"","currency":"TWD","amount":5000}],"skipped":0}\n\n'
+    + '輸出：{"bank":"中國信託","statementType":"銀行帳戶","transactions":[{"date":"2026/08/05","type":"收入","category":"薪資","item":"薪資","description":"電匯 醫療財團法人","institution":"中國信託","account":"中信","accountNumber":"","currency":"TWD","amount":120000,"balance":185000,"counterparty":""},{"date":"2026/08/07","type":"支出","category":"轉帳","item":"現金提","description":"ATM提款","institution":"中國信託","account":"中信","accountNumber":"","currency":"TWD","amount":20000,"balance":165000,"counterparty":""},{"date":"2026/08/12","type":"支出","category":"繳信用卡","item":"中信卡","description":"信用卡自動扣繳","institution":"中國信託","account":"中信","accountNumber":"","currency":"TWD","amount":8432,"balance":156568,"counterparty":""},{"date":"2026/08/20","type":"支出","category":"轉帳","item":"跨行轉","description":"轉出 8220001234567","institution":"中國信託","account":"中信","accountNumber":"","currency":"TWD","amount":5000,"balance":151568,"counterparty":"8220001234567"}],"skipped":0}\n\n'
 
     + '只回傳 JSON，不要有任何其他文字。';
 }
