@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'line-bot-accounting-app'. Update Purpose after archive.
+使用者透過 LINE 傳送一句自然語言或指定格式的文字訊息，系統呼叫 OpenAI 解析出類型、分類、品項、金額與帳戶，寫入「交易紀錄」工作表並嘗試自動配對轉帳／繳信用卡，最後以確認訊息回覆使用者。
 
 ## Requirements
 
@@ -38,9 +38,9 @@ code:
 ---
 ### Requirement: Parse text messages with OpenAI
 
-The system SHALL send the user's text message to OpenAI gpt-4o-mini API with a system prompt containing the current expense and income category lists AND the active account name list read from `getAccounts()`. The system SHALL use temperature 0 and response_format json_object. The API SHALL return a JSON object with fields: type (支出 or 收入), category (from the provided category list), item (short description), and amount (positive integer). The "account" field SHALL be selected from the provided account name list; ordinary cash transactions SHALL use account "現金"; if no account can be identified and the transaction is not cash, the field SHALL be an empty string.
+The system SHALL send the user's text message to OpenAI gpt-4o-mini API with a system prompt containing the current expense and income category lists AND the active account list read from `getAccounts()`. The system SHALL use temperature 0 and response_format json_object. The API SHALL return a JSON object with fields: type (支出 or 收入), category (from the provided category list), item (short description), and amount (positive integer). The "account" field SHALL be selected from the provided account list; ordinary cash transactions SHALL use account "現金"; if no account can be identified and the transaction is not cash, the field SHALL be an empty string.
 
-The function `parseWithOpenAI(message, expenseCategories, incomeCategories, accountNames)` SHALL accept a fourth parameter `accountNames` (array of strings) and pass it to `buildSystemPrompt()`. The `buildSystemPrompt()` function SHALL include the account name list in the system prompt with the instruction: "帳戶名稱必須從以下帳戶清單中選擇最接近的名稱；若完全無法對應，則填空字串" followed by the comma-separated account names.
+The function `parseWithOpenAI(message, expenseCategories, incomeCategories, accounts)` SHALL accept a fourth parameter `accounts` — an array of account objects (`{name, institution, currency, type, accountNumberHints}`, as returned by `getAccounts()`) — and pass it to `buildSystemPrompt()`. The `buildSystemPrompt()` function SHALL render this list via `describeAccounts(accounts)`, which formats each account as "名稱（機構，幣別，類型，帳號 hint1/hint2）" (the "，帳號 …" segment omitted when there are no non-blank `accountNumberHints`), joined with "、". Rule 7 of the system prompt SHALL be the exact string: "7. 帳戶名稱必須從以下帳戶清單中選擇；一般現金交易填「現金」；提到某銀行信用卡時選該銀行「類型=信用卡」的帳戶；無法對應則填空字串：" followed by `describeAccounts(accounts)`.
 
 #### Scenario: Natural language expense input
 
@@ -69,8 +69,8 @@ The function `parseWithOpenAI(message, expenseCategories, incomeCategories, acco
 
 #### Scenario: Account name matched from list
 
-- **WHEN** the user sends "玉山信用卡 加油1500" and the account list contains "玉山"
-- **THEN** OpenAI returns `{"account":"玉山","institution":"玉山銀行","type":"支出","category":"交通","item":"加油","amount":1500}`
+- **WHEN** the user sends "玉山信用卡 加油1500" and the `accounts` array (from `getAccounts()`) contains an object `{name: "玉山信用卡", institution: "玉山銀行", currency: "TWD", type: "信用卡", accountNumberHints: []}`, rendered in the prompt as "玉山信用卡（玉山銀行，TWD，信用卡）"
+- **THEN** OpenAI returns `{"account":"玉山信用卡","institution":"玉山銀行","type":"支出","category":"交通","item":"加油","amount":1500}`
 
 #### Scenario: Cash transaction uses cash account
 

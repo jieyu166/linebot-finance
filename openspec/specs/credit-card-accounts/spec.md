@@ -85,7 +85,7 @@ The system SHALL provide `dedupeAgainstSheet(transactions, ss)` to prevent the s
 When a duplicate is found:
 - The incoming transaction is added to `result.skipped` (not written to the sheet).
 - If the incoming transaction has a specific stock name (`category` is 投資 or 投資獲利, `item` is non-empty, and `item` does NOT match the generic pattern `GENERIC_STOCK_ITEMS` = /定期買股|交割|證券|股票/) while the existing row's `item` IS generic (matches that pattern), the existing row's F–G 欄 (品項, 明細描述) are overwritten with the incoming transaction's item/description, and `result.merged` is incremented.
-- Each existing row can be consumed as a duplicate at most once per call (later incoming transactions cannot match an already-consumed existing row), but duplicates among the incoming batch itself are compared against the (still generic) existing row again, so a same-day duplicate purchase (e.g. two identical "XSOLLA 670" charges) does not shrink to one row purely because of this rewrite step — only the first of the batch triggers the merge/skip against that existing row; the remainder are still checked and may separately match other rows or be kept.
+- Each existing row can be consumed as a duplicate at most once per call: once an existing row is matched, it is marked `used` and is excluded from the search for every subsequent incoming transaction in the same batch. So when two identical incoming transactions (e.g. two "XSOLLA 670" charges on the same account/date) both target one existing generic placeholder row, only the first of the two finds it (still unused) — it is skipped (and, if it carries a specific item, rewrites the existing row and increments `merged`). The second finds no unused match (the row is now `used`) and is written as a new row via `result.kept`. Transactions within the same incoming batch are never compared against each other directly — only against rows already present on the sheet.
 
 #### Scenario: Securities statement item overwrites a generic bank-statement placeholder
 
@@ -99,8 +99,35 @@ When a duplicate is found:
 
 #### Scenario: Genuine same-day duplicate transactions are not merged into one
 
-- **WHEN** the incoming batch has two separate rows both "XSOLLA" 670 on the same account/date, and only one existing generic placeholder row of the same amount exists
-- **THEN** exactly one of the two incoming rows is kept (matched and rewrites the existing row) while the other is also skipped as matching the (now-rewritten) existing row, with `result.merged` counting only the first rewrite
+- **WHEN** the incoming batch has two identical rows, both 支出／投資／"台積電" (with description "普買 台積電 4股") for 9,498 on 永豐證券 on the same date, and only one existing generic placeholder row ("定期買股", same amount/account/date) exists
+- **THEN** the first incoming row matches the existing row (marks it `used`), rewrites its 品項/明細描述 to "台積電" / "普買 台積電 4股", and is added to `result.skipped`; the second incoming row finds no unused match (the existing row is now `used`) and is added to `result.kept`, to be written as a new row — giving `result.kept.length` 1, `result.skipped.length` 1, and `result.merged` 1
+
+---
+### Requirement: Dual-currency card payment via transit account
+
+Some banks route a foreign-currency credit card's TWD settlement through a transit sub-account before crediting the USD card. The system SHALL provide `extractFxCardPayment(parsed, accounts)` (called from `parsePdfWithOpenAI`, before `resolveImportedAccounts`) to reassemble this into a single cross-currency 繳信用卡 pairing. Rows whose `accountNumber` digits (with "-" stripped) start with "19800" are treated as belonging to the USD transit block. If no such rows exist, `parsed` is returned unchanged.
+
+For the transit rows:
+- 支出 rows whose 品項/明細描述 contain "卡費" are summed and the total rounded to 2 decimal places; this becomes `fxAmount`, written onto the (non-transit) TWD 繳信用卡 row whose 品項/明細描述 contain "換匯" (only when that sum is greater than 0).
+- 收入 rows whose 品項/明細描述 contain "回饋" are kept but rewritten: `accountNumber` cleared, `account`/`institution` set to the bank's USD 信用卡 account (found via `findAccountByTypeAndBank(accounts, '信用卡', parsed.bank, 'USD')`), `currency` set to "USD", `category` set to "回饋", `type` set to "收入" — then moved into the kept transaction list. If no such USD card account is found, these reward rows are dropped instead.
+- All other transit rows (i.e. not a 卡費 支出 row and not a 回饋 收入 row) are dropped entirely.
+
+`autoPairImportedTransactions` then uses this `fxAmount` (when present on the matched transaction) as the USD-side amount when pairing a 繳信用卡 row against a credit card account whose `currency` differs from the row's own `currency`. When the card's currency differs from the row's currency and `fxAmount` is absent, the row is left unpaired and a detail message "…：外幣卡費金額不明，請在 App 手動連結" is recorded instead.
+
+#### Scenario: TWD transit-block card fee is summed into fxAmount on the 換匯 row
+
+- **WHEN** a bank statement import produces a TWD 繳信用卡 row for 16,257 with 品項/明細描述 containing "卡費換匯", plus transit-account (accountNumber starting 19800) 支出 rows of 10.04 and 499.62 both with 品項/明細描述 containing "卡費"
+- **THEN** `extractFxCardPayment` sets `fxAmount` to 509.66 on the 16,257 換匯 row, drops the transit rows from the transaction list, and `autoPairImportedTransactions` later pairs that row against the USD 信用卡 account using amount 509.66 (not 16,257) as the counterpart amount
+
+#### Scenario: Transit-block cashback reward is moved to the USD card account
+
+- **WHEN** a transit-account (accountNumber starting 19800) 收入 row has 品項/明細描述 containing "回饋" and the bank has a 信用卡／USD account resolvable via `findAccountByTypeAndBank`
+- **THEN** the row is kept with `accountNumber` cleared, `account`/`institution` set to that USD credit card account, `currency` "USD", `category` "回饋", `type` "收入"
+
+#### Scenario: Missing fxAmount blocks auto-pairing with a manual-link message
+
+- **WHEN** `autoPairImportedTransactions` processes a 繳信用卡 row whose resolved credit card account's `currency` differs from the row's `currency`, and the row carries no `fxAmount`
+- **THEN** the row is left unpaired, and `result.details` records "<分類 日期 帳戶 金額>：外幣卡費金額不明，請在 App 手動連結"
 
 ---
 ### Requirement: Legacy data migration to credit card accounts

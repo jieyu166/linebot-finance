@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change 'line-bot-accounting-app'. Update Purpose after archive.
+使用者上傳銀行／信用卡／證券對帳單 PDF 給 LINE Bot，系統辨識帳單類型與帳號、批次解析出多筆交易、去除與既有紀錄重複的項目，並嘗試自動配對轉帳與信用卡繳款，最後以一則摘要訊息回覆匯入結果。
 
 ## Requirements
 
