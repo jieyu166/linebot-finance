@@ -76,7 +76,7 @@ function curlFetch(url, options) {
 }
 
 const gs = loadGs(['SheetService.gs', 'TransferService.gs', 'Config.gs', 'OpenAIService.gs'], {
-  PropertiesService: { getScriptProperties: function() { return { getProperty: function() { return apiKey; } }; } },
+  PropertiesService: { getScriptProperties: function() { return { getProperty: function(key) { return key === 'OPENAI_API_KEY' ? apiKey : null; } }; } },
   UrlFetchApp: { fetch: curlFetch }
 });
 
@@ -129,7 +129,8 @@ txs.forEach(function(tx, i) {
     String(tx.amount) + (tx.fxAmount ? ' [fx ' + tx.fxAmount + ']' : ''),
     tx.item,
     tx.description,
-    tx.counterparty ? ('[cp: ' + tx.counterparty + ']') : ''
+    tx.counterparty ? ('[cp: ' + tx.counterparty + ']') : '',
+    (tx.balance !== undefined && tx.balance !== null) ? ('[bal ' + tx.balance + ']') : ''
   ].join(' | '));
 });
 

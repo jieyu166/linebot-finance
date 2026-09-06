@@ -241,6 +241,15 @@ t('dropSettlementBuyRows：證券帳戶上「定期買股」列丟棄並記錄 n
   assert.ok(parsed.notes.some(function(n) { return /交割戶買股扣款 1 筆已略過/.test(n); }), parsed.notes.join('|'));
 });
 
+t('dropSettlementBuyRows：即使 LLM 把該列分類誤標成非「投資」（如「轉帳」）仍依品項樣式丟棄', () => {
+  const parsed = {
+    notes: [],
+    transactions: [tx({ account: '永豐證券', type: '支出', category: '轉帳', item: '定期買股', amount: 9498 })]
+  };
+  gs.dropSettlementBuyRows(parsed, accounts());
+  assert.strictEqual(parsed.transactions.length, 0);
+});
+
 // ---------- resolveImportedAccounts：證券帳號忽略 accountNumber ----------
 
 t('resolveImportedAccounts：證券帳單忽略 accountNumber，一律以類型/機構解析且不記未對應', () => {

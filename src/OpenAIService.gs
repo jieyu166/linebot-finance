@@ -176,7 +176,7 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '## 交易分類規則\n'
     + '1. 一般消費：根據商店名稱判斷最適合的支出分類。\n'
     + '2. 回饋金/現金回饋：金額為負數且含「回饋」→ type:收入, category:回饋。\n'
-    + '   信用卡帳單中含「回饋」但不含「入帳戶」且為負數的列 → type:收入, category:回饋，account 記在該張卡的信用卡帳戶。\n'
+    + '   信用卡帳單中品項或摘要含「回饋」但不含「入帳戶」的列（無論金額欄位在原文是否已顯示負號、或 OCR 擷取後變成正數）→ 一律 type:收入, category:回饋，account 記在該張卡的信用卡帳戶，amount 用絕對值。例如「iLEO卡行動支付回饋」「現金回饋-iLEO信用卡」「UBear現金回饋」都是這一類，不可誤判為 type:支出。\n'
     + '   「大戶回饋」「幣倍回饋」「折讓款」→ type:收入, category:回饋。\n'
     + '   特殊情況：「大戶消費回饋入帳戶_國內 207 元」金額欄為 0，實際金額在描述中，請提取 207。\n'
     + '3. 國外交易服務費：→ type:支出, category:手續費。\n'
@@ -192,8 +192,11 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '   「現金提」「ATM提款」「跨行提款」→ type:支出, category:轉帳。\n'
     + '8. 信用卡款扣繳（從銀行帳戶扣信用卡費，例：卡款扣繳、信用卡自扣、信用卡款）→ type:支出, category:繳信用卡。\n'
     + '   「卡費換匯」→ type:支出, category:繳信用卡。「媒體轉帳 台新卡費」「玉山卡款扣繳」「中信卡」→ type:支出, category:繳信用卡。\n'
-    + '9. 「薪資」「電匯 醫療財團法人」→ type:收入, category:薪資。\n'
+    + '9. 「薪資」「電匯 醫療財團法人」→ type:收入, category:薪資。「電匯」摘要且對方單位含「醫院」「醫療」「診所」「財團法人」等字樣（即使名稱被截斷，如「奇美醫療財團法」）→ type:收入, category:薪資。\n'
     + '10. 愛金卡、一卡通、悠遊卡加值 → type:支出, category:交通。「優步-餐廳」「Uber Eats」→ type:支出, category:飲食。\n'
+    + '    ANTHROPIC/CLAUDE、OPENAI/CHATGPT、KOBO、BOOK WALKER/BOOK☆WALKER 等訂閱／電子書服務 → type:支出, category:學習（不要歸類為購物）。\n'
+    + '    momo、蝦皮、PChome → type:支出, category:購物。易遊網、NETFLIX、XSOLLA/PIKMIN、GOOGLE PLAY、YOUTUBE、PressPlay → type:支出, category:休閒。\n'
+    + '    信用卡帳單中「永豐自扣已入帳」「自動換匯自扣已入帳」等付款確認行（同第 1 條跳過規則）：即使金額被 OCR 擷取成正數也一律跳過，不要記為「國外交易服務費」或任何其他分類的交易。\n'
     + '11. 連結帳戶交易、連結帳戶扣款、線上支付、電子支付，若無明確商店或用途可判斷，多數先歸為 type:支出, category:飲食。\n'
     + '12. 發票獎金：→ type:收入, category:獎金。\n'
     + '13. 「連加*」前綴為感應支付消費，去除前綴後保留商店名稱。\n'
@@ -322,8 +325,11 @@ function resolveImportedAccounts(parsed, accounts) {
       }
     } else {
       acct = findAccountByName(accounts, tx.account);
-      if (st === '信用卡' && (!acct || acct.type !== '信用卡' || acct.currency !== currency)) {
-        acct = findAccountByTypeAndBank(accounts, '信用卡', parsed.bank || tx.institution, currency) || acct;
+      if (st === '信用卡') {
+        var bankMismatch = parsed.bank && acct && normalizeName(acct.institution).replace(/銀行$/, '') !== normalizeName(parsed.bank).replace(/銀行$/, '');
+        if (!acct || acct.type !== '信用卡' || acct.currency !== currency || bankMismatch) {
+          acct = findAccountByTypeAndBank(accounts, '信用卡', parsed.bank || tx.institution, currency) || acct;
+        }
       } else if (st === '證券' && (!acct || acct.type !== '證券')) {
         acct = findAccountByTypeAndBank(accounts, '證券', parsed.bank || tx.institution, currency) || acct;
       }
@@ -547,7 +553,7 @@ function dropSettlementBuyRows(parsed, accounts) {
   var txs = parsed.transactions || [];
   var dropped = 0;
   var kept = txs.filter(function(tx) {
-    if (brokerageNames[tx.account] && tx.category === '投資' && /定期買股|交割|證券買賣/.test((tx.item || '') + (tx.description || ''))) {
+    if (brokerageNames[tx.account] && tx.type === '支出' && /定期買股|交割|證券買賣/.test((tx.item || '') + (tx.description || ''))) {
       dropped++;
       return false;
     }

@@ -179,6 +179,15 @@ t('resolveImportedAccounts 信用卡帳單強制對應信用卡帳戶並依幣�
   assert.deepStrictEqual(r.transactions.map(x => x.currency), ['TWD', 'USD']);
 });
 
+t('resolveImportedAccounts 信用卡帳單：即使 tx.account 剛好對到別家銀行的信用卡帳戶名稱，仍以 parsed.bank（文字偵測結果）優先重新分流', () => {
+  const parsed = {
+    bank: '玉山銀行', statementType: '信用卡',
+    transactions: [tx({ account: '一銀信用卡', currency: 'TWD', item: 'U Bear 消費' })]
+  };
+  const r = gs.resolveImportedAccounts(parsed, accounts());
+  assert.strictEqual(r.transactions[0].account, '玉山信用卡');
+});
+
 t('resolveImportedAccounts 證券帳單強制對應證券帳戶', () => {
   const parsed = {
     bank: '永豐銀行', statementType: '證券',
