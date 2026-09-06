@@ -197,5 +197,56 @@ t('createTransfer：兩列同 transferId、類型支出／收入、source App', 
   assert.strictEqual(result[1].item, '來自永豐大戶');
 });
 
+t('createTransfer：跨幣別 toAmount 指定', () => {
+  const txSheet = fakeSheet([]);
+  const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': fakeAccountsSheet() });
+  const result = gs.createTransfer({ fromAccount: '永豐大戶', toAccount: '永豐外幣', amount: 161325, toAmount: 5000, date: '2026/09/01', note: '' }, ss);
+  assert.strictEqual(result.length, 2);
+  assert.strictEqual(result[0].transferId, result[1].transferId);
+  assert.strictEqual(result[0].amount, 161325);
+  assert.strictEqual(result[0].currency, 'TWD');
+  assert.strictEqual(result[1].amount, 5000);
+  assert.strictEqual(result[1].currency, 'USD');
+});
+
+t('createTransfer：跨幣別 toAmount 未指定時金額相同', () => {
+  const txSheet = fakeSheet([]);
+  const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': fakeAccountsSheet() });
+  const result = gs.createTransfer({ fromAccount: '永豐大戶', toAccount: '永豐外幣', amount: 161325, date: '2026/09/01', note: '' }, ss);
+  assert.strictEqual(result.length, 2);
+  assert.strictEqual(result[0].transferId, result[1].transferId);
+  assert.strictEqual(result[0].amount, 161325);
+  assert.strictEqual(result[0].currency, 'TWD');
+  assert.strictEqual(result[1].amount, 161325);
+  assert.strictEqual(result[1].currency, 'USD');
+});
+
+t('createTransfer：找不到帳戶拋錯', () => {
+  const txSheet = fakeSheet([]);
+  const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': fakeAccountsSheet() });
+  assert.throws(() => gs.createTransfer({ fromAccount: '不存在帳戶', toAccount: '玉山', amount: 1000, date: '2026/09/01', note: '' }, ss), /找不到帳戶/);
+});
+
+t('createTransfer：轉出轉入帳戶不可相同', () => {
+  const txSheet = fakeSheet([]);
+  const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': fakeAccountsSheet() });
+  assert.throws(() => gs.createTransfer({ fromAccount: '永豐大戶', toAccount: '永豐大戶', amount: 1000, date: '2026/09/01', note: '' }, ss), /不可相同/);
+});
+
+// ---- unlinkTransfer edge cases ----
+
+t('unlinkTransfer：找不到該轉帳ID回傳 0', () => {
+  const sheet = fakeSheet([
+    txRow('2026/09/01', '永豐銀行', '永豐大戶', '支出', '飲食', 100, 'TWD', 'idA'),
+    txRow('2026/09/01', '玉山銀行', '玉山', '收入', '飲食', 100, 'TWD', 'idB'),
+  ]);
+  const ss = fakeSs({ '交易紀錄': sheet });
+  const count = gs.unlinkTransfer('no-such-id', ss);
+  assert.strictEqual(count, 0);
+  const rows = sheet.getRange(2, 1, 2, 12).getValues();
+  assert.strictEqual(rows[0][11], '');
+  assert.strictEqual(rows[1][11], '');
+});
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);
