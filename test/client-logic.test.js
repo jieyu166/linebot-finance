@@ -57,6 +57,14 @@ t('formatMoney TWD 負數整數無小數', () => {
   assert.strictEqual(CL.formatMoney(-3000, 'TWD'), '-$3,000');
 });
 
+t('creditCardLabel 負數（欠款）顯示未繳', () => {
+  assert.strictEqual(CL.creditCardLabel(-0, 'TWD'), '未繳 $0');
+});
+t('creditCardLabel 非負（溢繳）顯示溢繳', () => {
+  assert.strictEqual(CL.creditCardLabel(100, 'TWD'), '溢繳 $100');
+  assert.strictEqual(CL.creditCardLabel(0, 'TWD'), '溢繳 $0');
+});
+
 t('pieSlices 兩項各半時第一片為半圓弧', () => {
   const slices = CL.pieSlices([
     { name: 'A', amount: 100 },

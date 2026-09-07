@@ -13,6 +13,10 @@
     budgetsYearMonth: null,
     budgetSheet: null,
     balances: [],
+    balancesLoaded: false,
+    accountSheet: null,
+    catsPanel: null,
+    catSheet: null,
     editing: null,
     filterCategory: ''
   };
@@ -76,7 +80,20 @@
         toast((err && err.message) || String(err), true);
         render();
       });
+    } else if (tab === 'accounts') {
+      loadBalances().then(render).catch(function (err) {
+        toast((err && err.message) || String(err), true);
+        render();
+      });
     }
+  }
+
+  /**
+   * 交易 / 轉帳配對變動後清除統計與預算快取，讓下次進入該分頁時重新抓資料。
+   */
+  function invalidateDerived() {
+    state.stats = {};
+    state.budgetsYearMonth = null;
   }
 
   /* ---------------- 新增／編輯頁（Task 6） ---------------- */
@@ -152,7 +169,8 @@
         transferId: tx.transferId || '',
         fromAccount: '',
         toAccount: '',
-        toAmount: ''
+        toAmount: '',
+        linkCandidates: null
       };
     } else {
       var defaultAccount = pickDefaultAccount();
@@ -172,7 +190,8 @@
         transferId: '',
         fromAccount: defaultAccount,
         toAccount: secondAccount ? secondAccount.name : '',
-        toAmount: ''
+        toAmount: '',
+        linkCandidates: null
       };
     }
     renderEditor();
@@ -263,6 +282,26 @@
     return html;
   }
 
+  function renderLinkSheet(ed) {
+    if (!ed.linkCandidates) { return ''; }
+    var html = '<div class="sheet-backdrop" data-action="sheet-close"><div class="sheet" data-action="sheet-noop">';
+    html += '<div class="sheet-header"><span>選擇要連結的交易</span>' +
+      '<button class="sheet-close" data-action="sheet-close">✕</button></div>';
+    if (ed.linkCandidates.length === 0) {
+      html += '<div class="empty">找不到可連結的交易（前後 7 天、同金額）</div>';
+    } else {
+      html += '<div class="list">';
+      ed.linkCandidates.forEach(function (c) {
+        html += '<button data-action="link-pick" data-id="' + esc(c.id) + '">' +
+          esc(c.date) + ' · ' + esc(c.account) + ' · ' + esc(c.item || '') + ' · ' +
+          esc(CL.formatMoney(c.amount, c.currency)) + '</button>';
+      });
+      html += '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
   function buildEditorHtml() {
     var ed = state.editing;
     var html = '<div class="editor">';
@@ -298,6 +337,7 @@
 
     html += renderEditorFields(ed);
     html += renderEditorFooter(ed);
+    html += renderLinkSheet(ed);
     html += '</div>';
     return html;
   }
@@ -396,6 +436,7 @@
         params.toAmount = toAmt;
       }
       api('apiCreateTransfer', params).then(function () {
+        invalidateDerived();
         closeEditor();
         return loadMonth();
       }).then(function () {
@@ -428,6 +469,7 @@
 
     api('apiSaveTransaction', payload).then(function (saved) {
       lastUsedAccount = ed.account;
+      invalidateDerived();
       closeEditor();
       return loadMonth().then(function () {
         render();
@@ -447,6 +489,7 @@
       alsoLinked = !!confirm('此筆為轉帳配對，要一併刪除對方那筆嗎？（取消 = 只刪這筆並解除連結）');
     }
     api('apiDeleteTransaction', ed.id, alsoLinked).then(function () {
+      invalidateDerived();
       closeEditor();
       return loadMonth();
     }).then(function () {
@@ -461,11 +504,40 @@
     var ed = state.editing;
     if (!ed || !ed.transferId) { return; }
     api('apiUnlinkTransfer', ed.transferId).then(function () {
+      invalidateDerived();
       closeEditor();
       return loadMonth();
     }).then(function () {
       render();
       toast('已解除連結');
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+    });
+  }
+
+  function doLinkOpen() {
+    var ed = state.editing;
+    if (!ed || !ed.id) { return; }
+    api('apiTransferCandidates', ed.id).then(function (list) {
+      if (!state.editing) { return; }
+      state.editing.linkCandidates = list || [];
+      renderEditor();
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+    });
+  }
+
+  function doLinkPick(pickedId) {
+    var ed = state.editing;
+    if (!ed || !ed.id || !pickedId) { return; }
+    if (!confirm('連結這兩筆為轉帳？')) { return; }
+    api('apiLinkTransfer', ed.id, pickedId).then(function () {
+      invalidateDerived();
+      closeEditor();
+      return loadMonth();
+    }).then(function () {
+      render();
+      toast('已連結');
     }).catch(function (err) {
       toast((err && err.message) || String(err), true);
     });
@@ -513,7 +585,14 @@
     } else if (action === 'unlink') {
       doUnlink();
     } else if (action === 'link') {
-      toast('連結功能下一版');
+      doLinkOpen();
+    } else if (action === 'link-pick') {
+      doLinkPick(el.getAttribute('data-id'));
+    } else if (action === 'sheet-close') {
+      ed.linkCandidates = null;
+      renderEditor();
+    } else if (action === 'sheet-noop') {
+      // 無動作：阻止點擊 sheet 內部空白處時被外層 backdrop 關閉
     }
   }
 
@@ -530,6 +609,23 @@
     }).catch(function (err) {
       toast(err && err.message ? err.message : String(err), true);
     });
+  }
+
+  /* ---------------- 帳戶分頁（Task 9） ---------------- */
+
+  function loadBalances() {
+    return api('apiBalances').then(function (list) {
+      state.balances = list || [];
+      state.balancesLoaded = true;
+    });
+  }
+
+  function findBalanceByName(name) {
+    var list = state.balances || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].name === name) { return list[i]; }
+    }
+    return null;
   }
 
   /* ---------------- 統計分頁（Task 8） ---------------- */
@@ -883,7 +979,182 @@
   }
 
   function renderAccounts() {
-    return '<div class="empty">（下一版）</div>';
+    if (!state.bootstrap) {
+      return '<div class="loading">載入中…</div>';
+    }
+
+    var html = '';
+    html += '<div class="section-header"><span class="section-header-title">帳戶</span>' +
+      '<button class="settings-btn" data-action="cats-open">⚙</button></div>';
+
+    if (!state.balancesLoaded) {
+      html += '<div class="loading">載入中…</div>';
+    } else {
+      var list = state.balances || [];
+      var assets = list.filter(function (a) { return a.type !== '信用卡'; });
+      var cards = list.filter(function (a) { return a.type === '信用卡'; });
+      html += renderAccountSection('【資產】', assets, false);
+      html += renderAccountSection('【信用卡】', cards, true);
+      html += '<div class="accounts-note">餘額 = 初始餘額 + 收入 − 支出</div>';
+    }
+
+    html += renderAccountSheet();
+    html += renderCatsPanel();
+    return html;
+  }
+
+  function renderAccountSection(title, list, isCredit) {
+    var html = '<div class="section-title">' + esc(title) + '</div>';
+    if (list.length === 0) {
+      html += '<div class="empty">尚無帳戶</div>';
+      return html;
+    }
+    html += '<div class="account-list">';
+    list.forEach(function (a) { html += renderAccountRow(a, isCredit); });
+    html += '</div>';
+    return html;
+  }
+
+  function renderAccountRow(a, isCredit) {
+    var balanceText = isCredit
+      ? CL.creditCardLabel(a.currentBalance, a.currency)
+      : CL.formatMoney(a.currentBalance, a.currency);
+    return '<div class="account-row" data-action="account-edit" data-name="' + esc(a.name) + '">' +
+      '<span class="account-name">' + esc(a.name) + '</span>' +
+      '<span class="account-balance">' + esc(balanceText) + '</span>' +
+      '</div>';
+  }
+
+  var ACCOUNT_TYPES = ['現金', '銀行', '信用卡', '證券'];
+
+  function renderAccountSheet() {
+    var sheet = state.accountSheet;
+    if (!sheet) { return ''; }
+    var html = '<div class="sheet-backdrop" data-action="sheet-close"><div class="sheet" data-action="sheet-noop">';
+    html += '<div class="sheet-header"><span>編輯帳戶：' + esc(sheet.name) + '</span>' +
+      '<button class="sheet-close" data-action="sheet-close">✕</button></div>';
+    html += '<div class="sheet-form">';
+    html += '<div class="field"><label>初始餘額</label><input type="number" step="any" id="acc-balance" value="' +
+      esc(sheet.initialBalance) + '"></div>';
+    html += '<div class="field"><label>初始日期</label><input type="date" id="acc-date" value="' +
+      esc(CL.toIsoDate(sheet.initialDate)) + '"></div>';
+    html += '<div class="field"><label>帳戶類型</label><select id="acc-type">';
+    ACCOUNT_TYPES.forEach(function (t) {
+      var sel = t === sheet.type ? ' selected' : '';
+      html += '<option value="' + esc(t) + '"' + sel + '>' + esc(t) + '</option>';
+    });
+    html += '</select></div>';
+    html += '<button class="btn-sheet-save" data-action="account-save">儲存</button>';
+    html += '</div></div></div>';
+    return html;
+  }
+
+  function doAccountSave() {
+    var sheet = state.accountSheet;
+    if (!sheet) { return; }
+    var balanceEl = document.getElementById('acc-balance');
+    var dateEl = document.getElementById('acc-date');
+    var typeEl = document.getElementById('acc-type');
+    var balance = Number(balanceEl ? balanceEl.value : '');
+    if (isNaN(balance)) {
+      toast('初始餘額不正確', true);
+      return;
+    }
+    var params = {
+      initialBalance: balance,
+      initialDate: CL.fromIsoDate(dateEl ? dateEl.value : ''),
+      type: typeEl ? typeEl.value : ''
+    };
+    api('apiSaveAccount', sheet.name, params).then(function () {
+      state.accountSheet = null;
+      toast('已儲存');
+      return Promise.all([
+        loadBalances(),
+        api('apiBootstrap').then(function (bs) { state.bootstrap = bs; })
+      ]);
+    }).then(function () {
+      render();
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+    });
+  }
+
+  function renderCatsPanel() {
+    var panel = state.catsPanel;
+    if (!panel) { return ''; }
+    var html = '<div class="cats-panel">';
+    html += '<div class="editor-header">' +
+      '<button class="editor-close" data-action="cats-close">✕</button>' +
+      '<div class="editor-title">分類管理</div>' +
+      '<div class="editor-header-spacer"></div>' +
+      '</div>';
+
+    html += '<div class="segment">';
+    ['支出', '收入'].forEach(function (t) {
+      var active = panel.type === t ? ' active' : '';
+      html += '<button class="' + active + '" data-action="cats-type" data-type="' + t + '">' + t + '</button>';
+    });
+    html += '</div>';
+
+    var bs = state.bootstrap;
+    var list = panel.type === '支出' ? ((bs && bs.expenseCategories) || []) : ((bs && bs.incomeCategories) || []);
+    html += '<div class="cats-list">';
+    list.forEach(function (c, index) {
+      var ic = catIconColor(c, index);
+      html += '<div class="cats-row" data-action="cat-edit" data-type="' + esc(panel.type) + '" data-name="' + esc(c.name) + '">' +
+        '<span class="cat-icon" style="background:' + esc(ic.color) + '">' + esc(ic.icon) + '</span>' +
+        '<span class="cats-row-name">' + esc(c.name) + '</span>' +
+        '</div>';
+    });
+    html += '</div>';
+    html += '<button class="btn-cat-add" data-action="cat-add">＋ 新增分類</button>';
+
+    html += renderCatSheet();
+    html += '</div>';
+    return html;
+  }
+
+  function renderCatSheet() {
+    var sheet = state.catSheet;
+    if (!sheet) { return ''; }
+    var html = '<div class="sheet-backdrop" data-action="sheet-close"><div class="sheet" data-action="sheet-noop">';
+    html += '<div class="sheet-header"><span>' + (sheet.oldName ? '編輯分類' : '新增分類') + '</span>' +
+      '<button class="sheet-close" data-action="sheet-close">✕</button></div>';
+    html += '<div class="sheet-form">';
+    html += '<div class="field"><label>名稱</label><input type="text" id="cat-name" value="' + esc(sheet.name) + '"></div>';
+    html += '<div class="field"><label>圖示</label><input type="text" id="cat-icon" maxlength="2" value="' + esc(sheet.icon) + '"></div>';
+    html += '<div class="field"><label>顏色</label><input type="color" id="cat-color" value="' + esc(sheet.color || CL.defaultColor(0)) + '"></div>';
+    html += '<button class="btn-sheet-save" data-action="cat-save">儲存</button>';
+    html += '</div></div></div>';
+    return html;
+  }
+
+  function doCatSave() {
+    var sheet = state.catSheet;
+    if (!sheet) { return; }
+    var nameEl = document.getElementById('cat-name');
+    var iconEl = document.getElementById('cat-icon');
+    var colorEl = document.getElementById('cat-color');
+    var name = nameEl ? nameEl.value.trim() : '';
+    var icon = iconEl ? iconEl.value : '';
+    var color = colorEl ? colorEl.value : '';
+    if (!name) {
+      toast('請輸入名稱', true);
+      return;
+    }
+    var renamed = !!(sheet.oldName && sheet.oldName !== name);
+    if (renamed && !confirm('歷史交易與預算會一併改名，繼續？')) { return; }
+    api('apiSaveCategory', { type: sheet.type, name: name, icon: icon, color: color, oldName: sheet.oldName }).then(function () {
+      state.catSheet = null;
+      invalidateDerived();
+      toast('已儲存');
+      return api('apiBootstrap');
+    }).then(function (bs) {
+      state.bootstrap = bs;
+      render();
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+    });
   }
 
   /* ---------------- events ---------------- */
@@ -943,6 +1214,8 @@
       render();
     } else if (action === 'sheet-close') {
       state.budgetSheet = null;
+      state.accountSheet = null;
+      state.catSheet = null;
       render();
     } else if (action === 'sheet-noop') {
       // 無動作：阻止點擊 sheet 內部空白處時被外層 backdrop 關閉
@@ -955,6 +1228,48 @@
       var editName = el.getAttribute('data-name');
       var editBudget = Number(el.getAttribute('data-budget')) || 0;
       budgetSaveFlow(editKind, editName, editBudget);
+    } else if (action === 'account-edit') {
+      var accName = el.getAttribute('data-name');
+      var balanceRow = findBalanceByName(accName);
+      var bootRow = findAccountView(accName);
+      state.accountSheet = {
+        name: accName,
+        initialBalance: (balanceRow && balanceRow.initialBalance != null) ? balanceRow.initialBalance : 0,
+        initialDate: (balanceRow && balanceRow.initialDate) || '',
+        type: (balanceRow && balanceRow.type) || (bootRow && bootRow.type) || '銀行'
+      };
+      render();
+    } else if (action === 'account-save') {
+      doAccountSave();
+    } else if (action === 'cats-open') {
+      state.catsPanel = { type: '支出' };
+      render();
+    } else if (action === 'cats-close') {
+      state.catsPanel = null;
+      render();
+    } else if (action === 'cats-type') {
+      if (state.catsPanel) {
+        state.catsPanel.type = el.getAttribute('data-type');
+        render();
+      }
+    } else if (action === 'cat-edit') {
+      var catType = el.getAttribute('data-type');
+      var catName = el.getAttribute('data-name');
+      var found = findCategoryByType(catType, catName);
+      state.catSheet = {
+        type: catType,
+        oldName: catName,
+        name: catName,
+        icon: (found && found.cat.icon) || '',
+        color: (found && found.cat.color) || CL.defaultColor(0)
+      };
+      render();
+    } else if (action === 'cat-add') {
+      var addType = (state.catsPanel && state.catsPanel.type) || '支出';
+      state.catSheet = { type: addType, oldName: '', name: '', icon: '', color: CL.defaultColor(0) };
+      render();
+    } else if (action === 'cat-save') {
+      doCatSave();
     }
   }
 
@@ -976,10 +1291,13 @@
     renderRecords: renderRecords,
     renderBudget: renderBudget,
     renderStats: renderStats,
+    renderAccounts: renderAccounts,
     loadBudgets: loadBudgets,
     loadStats: loadStats,
+    loadBalances: loadBalances,
     openEditor: openEditor,
-    closeEditor: closeEditor
+    closeEditor: closeEditor,
+    invalidateDerived: invalidateDerived
   };
 })();
 </script>

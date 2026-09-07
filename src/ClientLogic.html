@@ -10,6 +10,15 @@
     return DEFAULT_COLORS[i];
   }
 
+  // 信用卡餘額文字：負數（欠款）顯示「未繳」，非負（溢繳）顯示「溢繳」
+  function creditCardLabel(balance, currency) {
+    var n = Number(balance) || 0;
+    if (n < 0) {
+      return '未繳 ' + formatMoney(-n, currency);
+    }
+    return '溢繳 ' + formatMoney(n, currency);
+  }
+
   function budgetColor(level) {
     if (level === 'ok') return '#4CAF50';
     if (level === 'warn') return '#FF9800';
@@ -250,6 +259,7 @@
     applyKey: applyKey,
     groupByDate: groupByDate,
     formatMoney: formatMoney,
+    creditCardLabel: creditCardLabel,
     pieSlices: pieSlices,
     budgetColor: budgetColor,
     parseAmountInput: parseAmountInput,

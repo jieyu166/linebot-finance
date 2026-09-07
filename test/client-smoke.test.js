@@ -84,4 +84,22 @@ t('Index.html 包含三個 include 與 #app', () => {
   assert.ok(html.indexOf('<div id="app">') !== -1, '缺少 <div id="app">');
 });
 
+t('App.html 含帳戶分頁必要字串：renderAccounts、帳戶/分類/轉帳 API、cats-open、link-pick', () => {
+  var body = extractScriptBody(readSrc('App.html'));
+  [
+    'renderAccounts',
+    'apiBalances',
+    'apiSaveAccount',
+    'apiSaveCategory',
+    'apiTransferCandidates',
+    'apiLinkTransfer',
+    'apiUnlinkTransfer',
+    'invalidateDerived',
+    'cats-open',
+    'link-pick'
+  ].forEach(function (needle) {
+    assert.ok(body.indexOf(needle) !== -1, '缺少字串: ' + needle);
+  });
+});
+
 process.exit(failed ? 1 : 0);
