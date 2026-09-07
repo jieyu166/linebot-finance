@@ -547,4 +547,54 @@
   }
   .sheet .list button:last-child { border-bottom: none; }
   .sheet .list button:active { background: #F2F4F8; }
+
+  /* ---- 統計分頁（Task 8） ---- */
+  .pie {
+    max-width: 260px;
+    margin: 12px auto;
+  }
+  .pie svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .legend {
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--card);
+    border-radius: 12px;
+    padding: 10px 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    cursor: pointer;
+  }
+  .dot {
+    flex: 0 0 12px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+  .legend-name {
+    flex: 1;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .legend-amount {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .legend-pct {
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 34px;
+    text-align: right;
+  }
 </style>

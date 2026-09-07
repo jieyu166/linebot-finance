@@ -149,4 +149,10 @@ t('fromIsoDate 轉回後端格式', () => {
   assert.strictEqual(CL.fromIsoDate(''), '');
 });
 
+t('percent 四捨五入為整數百分比字串', () => {
+  assert.strictEqual(CL.percent(0.4249), '42%');
+  assert.strictEqual(CL.percent(0.005), '1%');
+  assert.strictEqual(CL.percent(0), '0%');
+});
+
 process.exit(failed ? 1 : 0);

@@ -62,6 +62,20 @@ t('App.html 含預算分頁必要字串：renderBudget、budget API、新增/編
   });
 });
 
+t('App.html 含統計分頁必要字串：renderStats、apiStats、pieSlices、stats-pick、stats-type、CL.percent', () => {
+  var body = extractScriptBody(readSrc('App.html'));
+  [
+    'renderStats',
+    'apiStats',
+    'pieSlices',
+    'stats-pick',
+    'stats-type',
+    'CL.percent'
+  ].forEach(function (needle) {
+    assert.ok(body.indexOf(needle) !== -1, '缺少字串: ' + needle);
+  });
+});
+
 t('Index.html 包含三個 include 與 #app', () => {
   var html = readSrc('Index.html');
   assert.ok(html.indexOf("include('Styles')") !== -1, '缺少 include(\'Styles\')');

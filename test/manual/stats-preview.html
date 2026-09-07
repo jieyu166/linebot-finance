@@ -1,3 +1,888 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --accent: #3F7CFF;
+    --bg: #F7F8FA;
+    --card: #fff;
+    --text: #222;
+    --muted: #888;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    font-size: 15px;
+  }
+
+  #app {
+    max-width: 600px;
+    margin: 0 auto;
+    min-height: 100vh;
+    position: relative;
+    padding-bottom: 72px;
+  }
+
+  a { color: inherit; }
+
+  /* ---- 頂部月份切換 ---- */
+  .month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 14px 12px 8px;
+  }
+  .month-nav button {
+    border: none;
+    background: none;
+    font-size: 20px;
+    color: var(--accent);
+    padding: 4px 12px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .month-nav .month-label {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  /* ---- 篩選 chip ---- */
+  .filter-bar {
+    display: flex;
+    justify-content: center;
+    padding: 0 12px 8px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--card);
+    border: 1px solid #E3E6EB;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .chip .x { cursor: pointer; color: var(--accent); font-weight: bold; }
+
+  /* ---- 日期分組 ---- */
+  .day-group { padding: 0 12px; }
+  .day-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 4px 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .day-head .totals span { margin-left: 8px; }
+  .day-head .totals .expense { color: #E53935; }
+  .day-head .totals .income { color: #43A047; }
+
+  .day-card {
+    background: var(--card);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+
+  /* ---- 交易列 ---- */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #F0F1F4;
+    cursor: pointer;
+  }
+  .row:last-child { border-bottom: none; }
+  .row:active { background: #F2F4F8; }
+
+  .row-chip {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    overflow: hidden;
+  }
+
+  .row-main { flex: 1; min-width: 0; }
+  .row-main .item {
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row-main .sub {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .amt {
+    flex: 0 0 auto;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .amt.expense { color: #E53935; }
+  .amt.income { color: #43A047; }
+
+  /* ---- 空狀態 / 載入 ---- */
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 60px 20px;
+    font-size: 14px;
+  }
+  .loading {
+    text-align: center;
+    color: var(--muted);
+    padding: 40px 20px;
+    font-size: 14px;
+  }
+
+  /* ---- 底部導覽列 ---- */
+  .tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 56px;
+    background: var(--card);
+    border-top: 1px solid #E3E6EB;
+    display: flex;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .tabbar button {
+    flex: 1;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+  }
+  .tabbar button.active { color: var(--accent); }
+  .tabbar button .ic { font-size: 18px; }
+
+  /* ---- 浮動新增按鈕 ---- */
+  .fab {
+    position: fixed;
+    right: max(16px, calc(50% - 300px + 16px));
+    bottom: 72px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    font-size: 28px;
+    line-height: 56px;
+    text-align: center;
+    box-shadow: 0 4px 10px rgba(63,124,255,0.4);
+    cursor: pointer;
+    z-index: 20;
+  }
+
+  /* ---- Toast ---- */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 84px;
+    transform: translateX(-50%);
+    background: rgba(30,30,30,0.9);
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    max-width: 80%;
+    text-align: center;
+    z-index: 60;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { background: rgba(229,57,53,0.92); }
+
+  /* ---- 新增／編輯頁覆蓋層 ---- */
+  .editor {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: var(--bg);
+    overflow-y: auto;
+    max-width: 600px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 24px;
+  }
+  /* 直接子項一律不得因高度不足被壓縮成 0（.editor 本身可捲動即可） */
+  .editor > * { flex-shrink: 0; }
+
+  .editor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 12px;
+    background: var(--card);
+    border-bottom: 1px solid #E3E6EB;
+  }
+  .editor-header .editor-close {
+    border: none;
+    background: none;
+    font-size: 18px;
+    color: var(--muted);
+    cursor: pointer;
+    width: 28px;
+  }
+  .editor-header .editor-title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .editor-header .editor-header-spacer { width: 28px; }
+
+  .segment {
+    display: flex;
+    margin: 12px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #E3E6EB;
+    background: var(--card);
+  }
+  .segment button {
+    flex: 1;
+    border: none;
+    background: none;
+    padding: 10px 4px;
+    font-size: 14px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .segment button.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .segment button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+  .amount-display {
+    text-align: right;
+    padding: 8px 20px 16px;
+    font-size: 36px;
+    font-weight: 700;
+    word-break: break-all;
+  }
+
+  .keypad {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-auto-rows: 56px;
+    gap: 1px;
+    background: #E3E6EB;
+    margin: 0 12px;
+    border-radius: 10px;
+    overflow: hidden;
+    flex: 0 0 auto;
+  }
+  .keypad .key {
+    min-height: 56px;
+    border: none;
+    background: var(--card);
+    font-size: 18px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .keypad .key:active { background: #F2F4F8; }
+
+  .keypad-actions {
+    display: flex;
+    gap: 8px;
+    margin: 8px 12px 16px;
+  }
+  .keypad-actions button {
+    flex: 1;
+    min-height: 48px;
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .keypad-actions .key-eq {
+    background: var(--card);
+    color: var(--accent);
+    border: 1px solid #E3E6EB;
+  }
+  .keypad-actions .key-save {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .catgrid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin: 4px 12px 16px;
+  }
+  .cat-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 2px;
+    border-radius: 10px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--text);
+    text-align: center;
+  }
+  .cat-chip.selected {
+    border-color: var(--accent);
+    background: var(--card);
+  }
+  .cat-chip .cat-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .cat-chip .cat-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .field {
+    margin: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .field label {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .field input,
+  .field select {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid #E3E6EB;
+    background: var(--card);
+    font-size: 15px;
+    color: var(--text);
+  }
+
+  .editor-footer {
+    display: flex;
+    gap: 8px;
+    margin: 16px 12px 0;
+  }
+  .editor-footer button {
+    flex: 1;
+    min-height: 44px;
+    border-radius: 10px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .editor-footer .btn-delete {
+    border: 1px solid #E53935;
+    background: var(--card);
+    color: #E53935;
+  }
+  .editor-footer .btn-unlink,
+  .editor-footer .btn-link {
+    border: 1px solid #E3E6EB;
+    background: var(--card);
+    color: var(--muted);
+  }
+
+  /* ---- 預算分頁 ---- */
+  .budget-header {
+    display: flex;
+    justify-content: center;
+    padding: 0 12px 12px;
+  }
+  .btn-add-budget {
+    border: 1px solid var(--accent);
+    background: var(--card);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .budget-list {
+    padding: 0 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .budget-row {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    cursor: pointer;
+  }
+  .budget-row-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .budget-icon {
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+  }
+  .budget-name {
+    font-size: 15px;
+    font-weight: 600;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bar {
+    height: 8px;
+    border-radius: 4px;
+    background: #E3E6EB;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .bar > i {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+  }
+  .budget-text {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ---- 底部選單（新增預算） ---- */
+  .sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 70;
+  }
+  .sheet {
+    background: var(--card);
+    width: 100%;
+    max-width: 600px;
+    border-radius: 16px 16px 0 0;
+    padding: 8px 0 24px;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px 12px;
+    font-size: 16px;
+    font-weight: 600;
+    border-bottom: 1px solid #F0F1F4;
+  }
+  .sheet-header .sheet-close {
+    border: none;
+    background: none;
+    font-size: 18px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .sheet .list {
+    display: flex;
+    flex-direction: column;
+  }
+  .sheet .list button {
+    border: none;
+    background: none;
+    text-align: left;
+    padding: 14px 16px;
+    font-size: 15px;
+    color: var(--text);
+    border-bottom: 1px solid #F0F1F4;
+    cursor: pointer;
+  }
+  .sheet .list button:last-child { border-bottom: none; }
+  .sheet .list button:active { background: #F2F4F8; }
+
+  /* ---- 統計分頁（Task 8） ---- */
+  .pie {
+    max-width: 260px;
+    margin: 12px auto;
+  }
+  .pie svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .legend {
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--card);
+    border-radius: 12px;
+    padding: 10px 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    cursor: pointer;
+  }
+  .dot {
+    flex: 0 0 12px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+  .legend-name {
+    flex: 1;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .legend-amount {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .legend-pct {
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 34px;
+    text-align: right;
+  }
+</style>
+
+</head>
+<body>
+<div id="app"></div>
+<script>
+window.__mockApi = function (name, args) {
+  var data = {"bootstrap":{"today":"2026/09/07","accounts":[{"name":"現金","currency":"TWD"},{"name":"銀行","currency":"TWD"}],"expenseCategories":[{"name":"飲食","icon":"🍚","color":"#FF7043"},{"name":"交通","icon":"🚗","color":"#3F7CFF"},{"name":"娛樂","icon":"🎮","color":"#43A047"}],"incomeCategories":[{"name":"薪資","icon":"💰","color":"#8E24AA"}]},"transactions":[],"stats":{"2026-09|支出":{"total":6000,"byCategory":[{"name":"飲食","amount":3000,"ratio":0.5},{"name":"交通","amount":2000,"ratio":0.3333},{"name":"娛樂","amount":1000,"ratio":0.1667}]},"2026-09|收入":{"total":40000,"byCategory":[{"name":"薪資","amount":40000,"ratio":1}]}}};
+  if (name === 'apiBootstrap') return data.bootstrap;
+  if (name === 'apiListTransactions') return data.transactions;
+  if (name === 'apiStats') {
+    var ym = args[0], type = args[1];
+    return data.stats[ym + '|' + type] || { total: 0, byCategory: [] };
+  }
+  return null;
+};
+</script>
+<script>
+(function () {
+  'use strict';
+
+  var DEFAULT_COLORS = ['#3F7CFF', '#FF7043', '#43A047', '#FFB300', '#8E24AA', '#00ACC1', '#E53935', '#6D4C41'];
+
+  function defaultColor(index) {
+    var n = DEFAULT_COLORS.length;
+    var i = ((index % n) + n) % n;
+    return DEFAULT_COLORS[i];
+  }
+
+  function budgetColor(level) {
+    if (level === 'ok') return '#4CAF50';
+    if (level === 'warn') return '#FF9800';
+    if (level === 'over') return '#F44336';
+    return '';
+  }
+
+  // 解析使用者輸入的金額字串（允許千分位逗號），無法解析回傳 NaN。
+  // 負數拒絕（0 除外，0 代表刪除）。
+  function parseAmountInput(raw) {
+    if (raw == null) return NaN;
+    var s = String(raw).trim().replace(/,/g, '');
+    if (s === '') return NaN;
+    if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
+    var n = Number(s);
+    if (Number.isNaN(n)) return NaN;
+    return n;
+  }
+
+  // 將 expr 拆成 tokens：數字（含小數點）與運算子 + - × ÷ * /
+  // 無法辨識的字元、空 token、連續運算子、開頭/結尾為運算子都視為不合法。
+  function tokenize(expr) {
+    var s = String(expr).replace(/\s+/g, '');
+    if (!s) return null;
+    var tokens = [];
+    var i = 0;
+    var expectNumber = true;
+    while (i < s.length) {
+      var ch = s[i];
+      if (/[0-9.]/.test(ch)) {
+        var j = i;
+        while (j < s.length && /[0-9.]/.test(s[j])) j++;
+        var numStr = s.slice(i, j);
+        if (!/^\d*\.?\d*$/.test(numStr) || numStr === '' || numStr === '.') return null;
+        var num = Number(numStr);
+        if (Number.isNaN(num)) return null;
+        tokens.push({ type: 'num', value: num });
+        i = j;
+        expectNumber = false;
+      } else if (ch === '+' || ch === '-' || ch === '×' || ch === '÷' || ch === '*' || ch === '/') {
+        if (expectNumber) return null; // 開頭或連續運算子
+        var op = ch === '×' ? '*' : (ch === '÷' ? '/' : ch);
+        tokens.push({ type: 'op', value: op });
+        i++;
+        expectNumber = true;
+      } else {
+        return null; // 無法辨識字元
+      }
+    }
+    if (expectNumber) return null; // 結尾為運算子
+    return tokens;
+  }
+
+  function evalCalc(expr) {
+    var tokens = tokenize(expr);
+    if (!tokens || tokens.length === 0) return NaN;
+
+    // 第一趟：處理 × ÷
+    var pass1 = [tokens[0]];
+    for (var i = 1; i < tokens.length; i += 2) {
+      var opTok = tokens[i];
+      var numTok = tokens[i + 1];
+      if (!numTok) return NaN;
+      if (opTok.value === '*' || opTok.value === '/') {
+        var prev = pass1.pop();
+        var result;
+        if (opTok.value === '*') {
+          result = prev.value * numTok.value;
+        } else {
+          if (numTok.value === 0) return NaN;
+          result = prev.value / numTok.value;
+        }
+        pass1.push({ type: 'num', value: result });
+      } else {
+        pass1.push(opTok);
+        pass1.push(numTok);
+      }
+    }
+
+    // 第二趟：處理 + -
+    var total = pass1[0].value;
+    for (var k = 1; k < pass1.length; k += 2) {
+      var op2 = pass1[k];
+      var num2 = pass1[k + 1];
+      if (!num2) return NaN;
+      if (op2.value === '+') {
+        total += num2.value;
+      } else if (op2.value === '-') {
+        total -= num2.value;
+      } else {
+        return NaN;
+      }
+    }
+
+    if (Number.isNaN(total)) return NaN;
+    return Math.round(total * 100) / 100;
+  }
+
+  // 計算機鍵盤輸入規則：把下一個按鍵套用到目前的 expr 上。
+  // justCalculated 代表上一步是「=」剛算出結果；此時：
+  //   - 數字/小數點：整個換成新輸入（不是接在結果後面）
+  //   - 運算子：接在結果後面（延續計算）
+  // ⌫ 一律視為正常編輯結果。
+  // 開頭或連續運算子一律視為不合法輸入，直接忽略（回傳不變的 expr）。
+  function applyKey(expr, key, justCalculated) {
+    var e = expr || '';
+    var isDigit = key === '.' || /^[0-9]$/.test(key);
+    var isOp = key === '+' || key === '−' || key === '×' || key === '÷';
+
+    if (key === '⌫') {
+      return { expr: e.slice(0, -1), justCalculated: false };
+    }
+    if (isDigit) {
+      if (justCalculated) {
+        return { expr: key, justCalculated: false };
+      }
+      return { expr: e + key, justCalculated: false };
+    }
+    if (isOp) {
+      if (justCalculated) {
+        return { expr: e + key, justCalculated: false };
+      }
+      if (e === '') {
+        return { expr: e, justCalculated: false }; // 不可開頭就是運算子
+      }
+      var lastChar = e.charAt(e.length - 1);
+      if (lastChar === '+' || lastChar === '−' || lastChar === '×' || lastChar === '÷') {
+        return { expr: e, justCalculated: false }; // 不可連續運算子
+      }
+      return { expr: e + key, justCalculated: false };
+    }
+    return { expr: e, justCalculated: justCalculated };
+  }
+
+  function groupByDate(txs) {
+    var order = [];
+    var map = {};
+    (txs || []).forEach(function (tx) {
+      var date = tx.date;
+      if (!map[date]) {
+        map[date] = { date: date, items: [], expense: 0, income: 0 };
+        order.push(date);
+      }
+      var g = map[date];
+      g.items.push(tx);
+      var amount = Number(tx.amount) || 0;
+      if (tx.type === 'income') {
+        g.income += Math.abs(amount);
+      } else if (tx.type === 'expense') {
+        g.expense += Math.abs(amount);
+      }
+    });
+    return order.map(function (d) { return map[d]; });
+  }
+
+  function formatMoney(n, currency) {
+    var amount = Number(n) || 0;
+    var abs = Math.abs(amount);
+    var hasCents = Math.round(abs * 100) % 100 !== 0;
+    var formatted = (amount < 0 ? '-' : '') + '$' + abs.toLocaleString('en-US', {
+      minimumFractionDigits: hasCents ? 2 : 0,
+      maximumFractionDigits: 2
+    });
+    if (currency && currency !== 'TWD') {
+      formatted += ' ' + currency;
+    }
+    return formatted;
+  }
+
+  function pieSlices(items, cx, cy, r) {
+    var positives = (items || []).filter(function (it) { return Number(it.amount) > 0; });
+    var total = positives.reduce(function (sum, it) { return sum + Number(it.amount); }, 0);
+    if (total <= 0 || positives.length === 0) return [];
+
+    if (positives.length === 1) {
+      var only = positives[0];
+      var d = 'M ' + cx + ' ' + (cy - r) +
+        ' A ' + r + ' ' + r + ' 0 1 1 ' + cx + ' ' + (cy + r) +
+        ' A ' + r + ' ' + r + ' 0 1 1 ' + cx + ' ' + (cy - r) + ' Z';
+      return [{ name: only.name, d: d, color: only.color || defaultColor(0) }];
+    }
+
+    var slices = [];
+    var angle = -Math.PI / 2; // 12 點鐘方向起算，順時針
+    positives.forEach(function (it, index) {
+      var ratio = Number(it.amount) / total;
+      var startAngle = angle;
+      var endAngle = angle + ratio * 2 * Math.PI;
+      var x1 = cx + r * Math.cos(startAngle);
+      var y1 = cy + r * Math.sin(startAngle);
+      var x2 = cx + r * Math.cos(endAngle);
+      var y2 = cy + r * Math.sin(endAngle);
+      var largeArc = ratio > 0.5 ? 1 : 0;
+      var dStr = 'M ' + cx + ' ' + cy +
+        ' L ' + x1 + ' ' + y1 +
+        ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' + x2 + ' ' + y2 + ' Z';
+      slices.push({ name: it.name, d: dStr, color: it.color || defaultColor(index) });
+      angle = endAngle;
+    });
+    return slices;
+  }
+
+  function yearMonthShift(yearMonth, delta) {
+    var parts = String(yearMonth).split('-');
+    var year = Number(parts[0]);
+    var month = Number(parts[1]);
+    var total = year * 12 + (month - 1) + delta;
+    var newYear = Math.floor(total / 12);
+    var newMonth = (total % 12) + 1;
+    return newYear + '-' + String(newMonth).padStart(2, '0');
+  }
+
+  function inferYearMonthLabel(yearMonth) {
+    var parts = String(yearMonth).split('-');
+    return parts[0] + '/' + parts[1];
+  }
+
+  // ratio (0~1) -> 四捨五入整數百分比字串，例如 0.4249 -> '42%'
+  function percent(ratio) {
+    var n = Number(ratio) || 0;
+    return Math.round(n * 100) + '%';
+  }
+
+  // 'yyyy/MM/dd' -> 'yyyy-MM-dd'（供 <input type="date"> 使用）
+  function toIsoDate(s) {
+    if (!s) return '';
+    return String(s).replace(/\//g, '-');
+  }
+
+  // 'yyyy-MM-dd' -> 'yyyy/MM/dd'（<input type="date"> 值轉回後端格式）
+  function fromIsoDate(s) {
+    if (!s) return '';
+    return String(s).replace(/-/g, '/');
+  }
+
+  window.CL = {
+    evalCalc: evalCalc,
+    applyKey: applyKey,
+    groupByDate: groupByDate,
+    formatMoney: formatMoney,
+    pieSlices: pieSlices,
+    budgetColor: budgetColor,
+    parseAmountInput: parseAmountInput,
+    defaultColor: defaultColor,
+    yearMonthShift: yearMonthShift,
+    inferYearMonthLabel: inferYearMonthLabel,
+    toIsoDate: toIsoDate,
+    fromIsoDate: fromIsoDate,
+    percent: percent
+  };
+})();
+</script>
+
 <script>
 (function () {
   'use strict';
@@ -983,3 +1868,6 @@
   };
 })();
 </script>
+
+</body>
+</html>

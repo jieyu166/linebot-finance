@@ -227,6 +227,12 @@
     return parts[0] + '/' + parts[1];
   }
 
+  // ratio (0~1) -> 四捨五入整數百分比字串，例如 0.4249 -> '42%'
+  function percent(ratio) {
+    var n = Number(ratio) || 0;
+    return Math.round(n * 100) + '%';
+  }
+
   // 'yyyy/MM/dd' -> 'yyyy-MM-dd'（供 <input type="date"> 使用）
   function toIsoDate(s) {
     if (!s) return '';
@@ -251,7 +257,8 @@
     yearMonthShift: yearMonthShift,
     inferYearMonthLabel: inferYearMonthLabel,
     toIsoDate: toIsoDate,
-    fromIsoDate: fromIsoDate
+    fromIsoDate: fromIsoDate,
+    percent: percent
   };
 })();
 </script>
