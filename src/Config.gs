@@ -159,14 +159,25 @@ function upsertDefaultAccounts(ss) {
   var defaultByName = {};
   DEFAULT_ACCOUNTS.forEach(function(row) { defaultByName[normalizeName(row[0])] = row; });
   var filledCount = 0;
+
+  var names = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
+  names.forEach(function(row) { existing[normalizeName(row[0])] = true; });
+  var missing = DEFAULT_ACCOUNTS.filter(function(row) { return !existing[normalizeName(row[0])]; });
+
+  // 欄 J（帳號識別）內容常是逗號分隔的數字提示字串（如 "0015977,0381979"），
+  // Google Sheets 若把該欄當數字格式，會把逗號當千分位符號解析、吃掉前導零，
+  // 寫入前先把整欄（含即將新增的缺少帳戶列）設成純文字格式，避免被自動轉型。
+  var jRange = sheet.getRange(2, 10, Math.max(lastRow - 1, 1) + missing.length, 1);
+  if (typeof jRange.setNumberFormat === 'function') {
+    jRange.setNumberFormat('@');
+  }
+
   if (lastRow >= 2) {
-    var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
     var hijRange = sheet.getRange(2, 8, lastRow - 1, 3);
     var hijValues = hijRange.getValues();
     var changed = false;
     names.forEach(function(row, i) {
       var key = normalizeName(row[0]);
-      existing[key] = true;
       var def = defaultByName[key];
       if (!def) { return; }
       var rowChanged = false;
@@ -176,11 +187,23 @@ function upsertDefaultAccounts(ss) {
           rowChanged = true;
         }
       }
+      // J 欄（索引 c=2）已有值，但被 Sheets 解析成數字（或字串裡除了逗號外
+      // 還有非數字以外的雜訊、且跟預設提示不同），視為壞資料，用預設提示覆寫
+      var jValue = hijValues[i][2];
+      var defHint = def[9];
+      if (defHint) {
+        var isCorrupted = typeof jValue === 'number' ||
+          (typeof jValue === 'string' && jValue !== '' && /^[\d,]+$/.test(jValue) && jValue !== defHint);
+        if (isCorrupted) {
+          hijValues[i][2] = defHint;
+          rowChanged = true;
+          Logger.log('修復帳號識別：' + row[0] + ' → ' + defHint);
+        }
+      }
       if (rowChanged) { changed = true; filledCount++; }
     });
     if (changed) { hijRange.setValues(hijValues); }
   }
-  var missing = DEFAULT_ACCOUNTS.filter(function(row) { return !existing[normalizeName(row[0])]; });
   if (missing.length > 0) { sheet.getRange(lastRow + 1, 1, missing.length, ACCOUNT_HEADERS.length).setValues(missing); }
   Logger.log('帳戶管理新增 ' + missing.length + ' 筆');
   if (filledCount > 0) { Logger.log('補齊 ' + filledCount + ' 個既有帳戶的空白欄位'); }
