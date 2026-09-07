@@ -1,0 +1,270 @@
+<script>
+(function () {
+  'use strict';
+
+  var state = {
+    tab: 'records',
+    yearMonth: '',
+    bootstrap: null,
+    transactions: [],
+    stats: null,
+    budgets: [],
+    balances: [],
+    editing: null,
+    filterCategory: ''
+  };
+
+  var TABS = [
+    { key: 'records', label: '紀錄', icon: '📒' },
+    { key: 'budget', label: '預算', icon: '🎯' },
+    { key: 'stats', label: '統計', icon: '📊' },
+    { key: 'accounts', label: '帳戶', icon: '🏦' }
+  ];
+
+  /**
+   * 呼叫後端 API，回傳 Promise。若 window.__mockApi 存在（本機測試/開發用），
+   * 改呼叫 mock 而不觸發 google.script.run。
+   */
+  function api(name) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      if (typeof window.__mockApi === 'function') {
+        Promise.resolve(window.__mockApi(name, args)).then(resolve, reject);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(function (err) { reject(err); })
+        [name].apply(null, args);
+    });
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  var toastTimer = null;
+  function toast(msg, isError) {
+    var el = document.getElementById('toast');
+    if (!el) { return; }
+    el.textContent = msg;
+    el.className = 'toast show' + (isError ? ' error' : '');
+    if (toastTimer) { clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function () {
+      el.className = 'toast';
+    }, 2500);
+  }
+
+  function setTab(tab) {
+    state.tab = tab;
+    render();
+  }
+
+  function openEditor(tx) {
+    // Task 6 實作；此任務先給提示
+    toast('編輯功能下一版');
+  }
+
+  function loadMonth() {
+    return api('apiListTransactions', state.yearMonth).then(function (txs) {
+      state.transactions = txs || [];
+    });
+  }
+
+  function init() {
+    api('apiBootstrap').then(function (bootstrap) {
+      state.bootstrap = bootstrap;
+      var todayYm = String(bootstrap.today || '').split('/').slice(0, 2).join('-');
+      state.yearMonth = todayYm || state.yearMonth;
+      return loadMonth();
+    }).then(function () {
+      render();
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+      render();
+    });
+  }
+
+  /* ---------------- render ---------------- */
+
+  function render() {
+    var app = document.getElementById('app');
+    if (!app) { return; }
+    var body = '';
+    if (state.tab === 'records') {
+      body = renderRecords();
+    } else if (state.tab === 'budget') {
+      body = renderBudget();
+    } else if (state.tab === 'stats') {
+      body = renderStats();
+    } else if (state.tab === 'accounts') {
+      body = renderAccounts();
+    }
+    app.innerHTML = body + renderFab() + renderTabbar() + '<div class="toast" id="toast"></div>';
+  }
+
+  function renderTabbar() {
+    var html = '<div class="tabbar">';
+    TABS.forEach(function (t) {
+      var active = state.tab === t.key ? ' active' : '';
+      html += '<button class="' + active + '" data-action="tab" data-tab="' + t.key + '">' +
+        '<span class="ic">' + t.icon + '</span><span>' + t.label + '</span></button>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function renderFab() {
+    return '<button class="fab" data-action="fab">+</button>';
+  }
+
+  function categoryLookup(type, name) {
+    var bs = state.bootstrap;
+    if (!bs) { return null; }
+    var list = type === 'expense' ? bs.expenseCategories : bs.incomeCategories;
+    list = list || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].name === name) { return { cat: list[i], index: i }; }
+    }
+    return null;
+  }
+
+  function renderRecords() {
+    if (!state.bootstrap) {
+      return '<div class="loading">載入中…</div>';
+    }
+
+    var html = '';
+    html += '<div class="month-nav">' +
+      '<button data-action="month-prev">‹</button>' +
+      '<span class="month-label">' + esc(CL.inferYearMonthLabel(state.yearMonth)) + '</span>' +
+      '<button data-action="month-next">›</button>' +
+      '</div>';
+
+    if (state.filterCategory) {
+      html += '<div class="filter-bar"><span class="chip">' + esc(state.filterCategory) +
+        ' <span class="x" data-action="clear-filter">✕</span></span></div>';
+    }
+
+    var txs = state.transactions || [];
+    var filtered = state.filterCategory
+      ? txs.filter(function (t) { return t.category === state.filterCategory; })
+      : txs;
+
+    if (filtered.length === 0) {
+      html += '<div class="empty">本月尚無交易紀錄</div>';
+      return html;
+    }
+
+    var mapped = filtered.map(function (t) {
+      var copy = {};
+      for (var k in t) { copy[k] = t[k]; }
+      copy.type = t.type === '支出' ? 'expense' : 'income';
+      return copy;
+    });
+
+    var groups = CL.groupByDate(mapped);
+
+    html += '<div class="day-group">';
+    groups.forEach(function (g) {
+      html += '<div class="day-head"><span>' + esc(g.date) + '</span>' +
+        '<span class="totals">' +
+        (g.expense ? '<span class="expense">-' + CL.formatMoney(g.expense, 'TWD') + '</span>' : '') +
+        (g.income ? '<span class="income">+' + CL.formatMoney(g.income, 'TWD') + '</span>' : '') +
+        '</span></div>';
+      html += '<div class="day-card">';
+      g.items.forEach(function (item) {
+        html += renderRow(item);
+      });
+      html += '</div>';
+    });
+    html += '</div>';
+
+    return html;
+  }
+
+  function renderRow(item) {
+    var lookup = categoryLookup(item.type, item.category);
+    var color = (lookup && lookup.cat.color) || CL.defaultColor(lookup ? lookup.index : 0);
+    var icon = (lookup && lookup.cat.icon) || (item.category ? String(item.category).charAt(0) : '?');
+    var sub = esc(item.account || '');
+    if (item.linkedAccount) {
+      sub += ' ⇄ ' + esc(item.linkedAccount);
+    }
+    var cls = item.type === 'expense' ? 'expense' : 'income';
+    var sign = item.type === 'expense' ? '-' : '+';
+    return '<div class="row" data-action="open" data-id="' + esc(item.id) + '">' +
+      '<div class="row-chip" style="background:' + esc(color) + '">' + esc(icon) + '</div>' +
+      '<div class="row-main">' +
+      '<div class="item">' + esc(item.item || item.category || '') + '</div>' +
+      '<div class="sub">' + sub + '</div>' +
+      '</div>' +
+      '<div class="amt ' + cls + '">' + sign + esc(CL.formatMoney(item.amount, item.currency)) + '</div>' +
+      '</div>';
+  }
+
+  function renderBudget() {
+    return '<div class="empty">（下一版）</div>';
+  }
+
+  function renderStats() {
+    return '<div class="empty">（下一版）</div>';
+  }
+
+  function renderAccounts() {
+    return '<div class="empty">（下一版）</div>';
+  }
+
+  /* ---------------- events ---------------- */
+
+  function onAppClick(e) {
+    var el = e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el) { return; }
+    var action = el.getAttribute('data-action');
+    if (action === 'tab') {
+      setTab(el.getAttribute('data-tab'));
+    } else if (action === 'month-prev') {
+      state.yearMonth = CL.yearMonthShift(state.yearMonth, -1);
+      state.filterCategory = '';
+      render();
+      loadMonth().then(render).catch(function (err) { toast((err && err.message) || String(err), true); });
+    } else if (action === 'month-next') {
+      state.yearMonth = CL.yearMonthShift(state.yearMonth, 1);
+      state.filterCategory = '';
+      render();
+      loadMonth().then(render).catch(function (err) { toast((err && err.message) || String(err), true); });
+    } else if (action === 'clear-filter') {
+      state.filterCategory = '';
+      render();
+    } else if (action === 'open') {
+      var id = el.getAttribute('data-id');
+      var tx = (state.transactions || []).filter(function (t) { return t.id === id; })[0] || null;
+      openEditor(tx);
+    } else if (action === 'fab') {
+      openEditor(null);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var app = document.getElementById('app');
+    if (app) { app.addEventListener('click', onAppClick); }
+    init();
+  });
+
+  // 對外暴露（供測試 / 除錯）
+  window.__app = {
+    state: state,
+    api: api,
+    render: render,
+    setTab: setTab,
+    loadMonth: loadMonth,
+    init: init,
+    renderRecords: renderRecords
+  };
+})();
+</script>

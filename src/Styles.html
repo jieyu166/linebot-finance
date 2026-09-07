@@ -1,0 +1,225 @@
+<style>
+  :root {
+    --accent: #3F7CFF;
+    --bg: #F7F8FA;
+    --card: #fff;
+    --text: #222;
+    --muted: #888;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    font-size: 15px;
+  }
+
+  #app {
+    max-width: 600px;
+    margin: 0 auto;
+    min-height: 100vh;
+    position: relative;
+    padding-bottom: 72px;
+  }
+
+  a { color: inherit; }
+
+  /* ---- 頂部月份切換 ---- */
+  .month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 14px 12px 8px;
+  }
+  .month-nav button {
+    border: none;
+    background: none;
+    font-size: 20px;
+    color: var(--accent);
+    padding: 4px 12px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .month-nav .month-label {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  /* ---- 篩選 chip ---- */
+  .filter-bar {
+    display: flex;
+    justify-content: center;
+    padding: 0 12px 8px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--card);
+    border: 1px solid #E3E6EB;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .chip .x { cursor: pointer; color: var(--accent); font-weight: bold; }
+
+  /* ---- 日期分組 ---- */
+  .day-group { padding: 0 12px; }
+  .day-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 4px 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .day-head .totals span { margin-left: 8px; }
+  .day-head .totals .expense { color: #E53935; }
+  .day-head .totals .income { color: #43A047; }
+
+  .day-card {
+    background: var(--card);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+
+  /* ---- 交易列 ---- */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #F0F1F4;
+    cursor: pointer;
+  }
+  .row:last-child { border-bottom: none; }
+  .row:active { background: #F2F4F8; }
+
+  .row-chip {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    overflow: hidden;
+  }
+
+  .row-main { flex: 1; min-width: 0; }
+  .row-main .item {
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row-main .sub {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .amt {
+    flex: 0 0 auto;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .amt.expense { color: #E53935; }
+  .amt.income { color: #43A047; }
+
+  /* ---- 空狀態 / 載入 ---- */
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 60px 20px;
+    font-size: 14px;
+  }
+  .loading {
+    text-align: center;
+    color: var(--muted);
+    padding: 40px 20px;
+    font-size: 14px;
+  }
+
+  /* ---- 底部導覽列 ---- */
+  .tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 56px;
+    background: var(--card);
+    border-top: 1px solid #E3E6EB;
+    display: flex;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .tabbar button {
+    flex: 1;
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+  }
+  .tabbar button.active { color: var(--accent); }
+  .tabbar button .ic { font-size: 18px; }
+
+  /* ---- 浮動新增按鈕 ---- */
+  .fab {
+    position: fixed;
+    right: max(16px, calc(50% - 300px + 16px));
+    bottom: 72px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    font-size: 28px;
+    line-height: 56px;
+    text-align: center;
+    box-shadow: 0 4px 10px rgba(63,124,255,0.4);
+    cursor: pointer;
+    z-index: 20;
+  }
+
+  /* ---- Toast ---- */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 84px;
+    transform: translateX(-50%);
+    background: rgba(30,30,30,0.9);
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    max-width: 80%;
+    text-align: center;
+    z-index: 30;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { background: rgba(229,57,53,0.92); }
+</style>
