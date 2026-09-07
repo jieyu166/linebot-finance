@@ -3,9 +3,17 @@
  */
 
 /**
- * GET 請求處理（部署驗證用）
+ * GET 請求處理：帶 ui=1 時回傳網頁 App 主頁，否則維持部署驗證用的 'OK'
+ * @param {Object} e - GET 事件物件
+ * @returns {HtmlOutput|TextOutput}
  */
 function doGet(e) {
+  if (e && e.parameter && e.parameter.ui === '1') {
+    return HtmlService.createTemplateFromFile('Index')
+      .evaluate()
+      .setTitle('記帳')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+  }
   return ContentService.createTextOutput('OK');
 }
 

@@ -45,7 +45,16 @@ function loadGs(files, extraGlobals) {
     getUuid: function() { uuidCounter++; return 'uuid-' + String(uuidCounter).padStart(4, '0'); }
   });
   const LockService = { getScriptLock: () => ({ waitLock() {}, releaseLock() {}, tryLock() { return true; } }) };
-  const injected = Object.assign({ Utilities: utilities, Logger, LockService, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
+  const HtmlService = {
+    createTemplateFromFile: function(name) {
+      return { evaluate: function() { return { setTitle: function() { return this; }, addMetaTag: function() { return this; }, _name: name }; } };
+    },
+    createHtmlOutputFromFile: function(name) {
+      return { getContent: function() { return '<!--' + name + '-->'; } };
+    }
+  };
+  const ContentService = { createTextOutput: function(s) { return { _text: s }; } };
+  const injected = Object.assign({ Utilities: utilities, Logger, LockService, HtmlService, ContentService, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
 
   const injectedKeys = Object.keys(injected);
   injectedKeys.forEach(function(k) { global[k] = injected[k]; });
