@@ -15,6 +15,22 @@ t('evalCalc 尾端運算子回傳 NaN', () => {
   assert.ok(Number.isNaN(CL.evalCalc('1+')));
 });
 
+t('applyKey 剛算完結果後按數字：整個換成新輸入', () => {
+  assert.deepStrictEqual(CL.applyKey('80', '5', true), { expr: '5', justCalculated: false });
+});
+t('applyKey 剛算完結果後按運算子：接在結果後面延續計算', () => {
+  assert.deepStrictEqual(CL.applyKey('80', '+', true), { expr: '80+', justCalculated: false });
+});
+t('applyKey ⌫ 正常刪除最後一個字元', () => {
+  assert.deepStrictEqual(CL.applyKey('12', '⌫', false), { expr: '1', justCalculated: false });
+});
+t('applyKey 開頭不可為運算子', () => {
+  assert.deepStrictEqual(CL.applyKey('', '−', false), { expr: '', justCalculated: false });
+});
+t('applyKey 不可連續運算子', () => {
+  assert.deepStrictEqual(CL.applyKey('1+', '+', false), { expr: '1+', justCalculated: false });
+});
+
 t('groupByDate 兩天各自合計，保持輸入順序', () => {
   const txs = [
     { date: '2026-09-01', amount: -100, type: 'expense' },

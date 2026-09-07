@@ -96,6 +96,42 @@
     return Math.round(total * 100) / 100;
   }
 
+  // 計算機鍵盤輸入規則：把下一個按鍵套用到目前的 expr 上。
+  // justCalculated 代表上一步是「=」剛算出結果；此時：
+  //   - 數字/小數點：整個換成新輸入（不是接在結果後面）
+  //   - 運算子：接在結果後面（延續計算）
+  // ⌫ 一律視為正常編輯結果。
+  // 開頭或連續運算子一律視為不合法輸入，直接忽略（回傳不變的 expr）。
+  function applyKey(expr, key, justCalculated) {
+    var e = expr || '';
+    var isDigit = key === '.' || /^[0-9]$/.test(key);
+    var isOp = key === '+' || key === '−' || key === '×' || key === '÷';
+
+    if (key === '⌫') {
+      return { expr: e.slice(0, -1), justCalculated: false };
+    }
+    if (isDigit) {
+      if (justCalculated) {
+        return { expr: key, justCalculated: false };
+      }
+      return { expr: e + key, justCalculated: false };
+    }
+    if (isOp) {
+      if (justCalculated) {
+        return { expr: e + key, justCalculated: false };
+      }
+      if (e === '') {
+        return { expr: e, justCalculated: false }; // 不可開頭就是運算子
+      }
+      var lastChar = e.charAt(e.length - 1);
+      if (lastChar === '+' || lastChar === '−' || lastChar === '×' || lastChar === '÷') {
+        return { expr: e, justCalculated: false }; // 不可連續運算子
+      }
+      return { expr: e + key, justCalculated: false };
+    }
+    return { expr: e, justCalculated: justCalculated };
+  }
+
   function groupByDate(txs) {
     var order = [];
     var map = {};
@@ -193,6 +229,7 @@
 
   window.CL = {
     evalCalc: evalCalc,
+    applyKey: applyKey,
     groupByDate: groupByDate,
     formatMoney: formatMoney,
     pieSlices: pieSlices,

@@ -134,6 +134,7 @@
         description: tx.description || '',
         amount: tx.amount,
         expr: String(tx.amount == null ? '' : tx.amount),
+        justCalculated: false,
         transferId: tx.transferId || '',
         fromAccount: '',
         toAccount: '',
@@ -153,6 +154,7 @@
         description: '',
         amount: '',
         expr: '',
+        justCalculated: false,
         transferId: '',
         fromAccount: defaultAccount,
         toAccount: secondAccount ? secondAccount.name : '',
@@ -259,7 +261,8 @@
     html += '<div class="segment">';
     MODES.forEach(function (m) {
       var active = ed.mode === m.key ? ' active' : '';
-      var disabled = ed.id ? ' disabled' : '';
+      var isDisabled = ed.transferId ? true : (ed.id && m.key === 'transfer');
+      var disabled = isDisabled ? ' disabled' : '';
       html += '<button class="' + active + '" data-action="set-mode" data-mode="' + m.key + '"' + disabled + '>' +
         m.label + '</button>';
     });
@@ -342,6 +345,7 @@
     }
     state.editing.expr = String(val);
     state.editing.amount = val;
+    state.editing.justCalculated = true;
     updateAmountDisplay();
   }
 
@@ -423,11 +427,10 @@
   function doDelete() {
     var ed = state.editing;
     if (!ed || !ed.id) { return; }
+    if (!confirm('確定刪除這筆交易？')) { return; }
     var alsoLinked = false;
     if (ed.transferId) {
-      alsoLinked = !!confirm('此筆為轉帳配對，要一併刪除對方那筆嗎？');
-    } else if (!confirm('確定刪除？')) {
-      return;
+      alsoLinked = !!confirm('此筆為轉帳配對，要一併刪除對方那筆嗎？（取消 = 只刪這筆並解除連結）');
     }
     api('apiDeleteTransaction', ed.id, alsoLinked).then(function () {
       closeEditor();
@@ -464,19 +467,25 @@
     if (action === 'close') {
       closeEditor();
     } else if (action === 'set-mode') {
-      if (ed.id) {
+      if (ed.transferId) {
         toast('轉帳配對請用解除連結後重建', true);
         return;
       }
-      ed.mode = el.getAttribute('data-mode');
+      var newMode = el.getAttribute('data-mode');
+      if (ed.id && newMode === 'transfer') {
+        // 既有交易的三段切換已停用「轉帳」按鈕，正常情況下不會到這裡；保留防呆。
+        return;
+      }
+      if (newMode !== ed.mode) {
+        ed.mode = newMode;
+        ed.category = '';
+      }
       renderEditor();
     } else if (action === 'key') {
       var k = el.getAttribute('data-key');
-      if (k === '⌫') {
-        ed.expr = (ed.expr || '').slice(0, -1);
-      } else {
-        ed.expr = (ed.expr || '') + k;
-      }
+      var result = CL.applyKey(ed.expr, k, ed.justCalculated);
+      ed.expr = result.expr;
+      ed.justCalculated = result.justCalculated;
       updateAmountDisplay();
     } else if (action === 'calc') {
       doCalc();

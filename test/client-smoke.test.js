@@ -40,7 +40,9 @@ t('App.html 含新增／編輯頁必要字串：openEditor、closeEditor、四�
     'apiDeleteTransaction',
     'apiUnlinkTransfer',
     'data-action="key"',
-    'CL.evalCalc'
+    'CL.evalCalc',
+    'applyKey',
+    'justCalculated'
   ].forEach(function (needle) {
     assert.ok(body.indexOf(needle) !== -1, '缺少字串: ' + needle);
   });
