@@ -521,6 +521,8 @@
     return api('apiBudgetUsage', state.yearMonth).then(function (list) {
       state.budgets = list || [];
       state.budgetsYearMonth = state.yearMonth;
+    }).catch(function (err) {
+      toast(err && err.message ? err.message : String(err), true);
     });
   }
 
