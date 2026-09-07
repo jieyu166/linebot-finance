@@ -411,7 +411,7 @@ var INITIAL_BALANCES = [
   { name: '台新',       balance: 0,   date: '2026/08/31' },
   { name: '中信',       balance: 0,    date: '2026/08/31' },
   { name: '富邦',       balance: 0,    date: '2026/08/31' },
-  { name: '國泰',       balance: 0,        date: '2026/08/31' },   // 追蹤表為 -0，請確認是否為信用卡未繳
+  { name: '國泰',       balance: 0,        date: '2026/08/31' },   // 若銀行 App 餘額已扣掉信用卡未入帳金額，請分開填
   { name: '樂天',       balance: 0,    date: '2026/08/31' },
   // 信用卡：最近一期「本期應繳總額」的負數，日期填該期結帳日
   { name: '永豐信用卡',     balance: 0,  date: '2026/08/31' },

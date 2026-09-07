@@ -80,12 +80,12 @@ t('fixDirectionByBalance：玉山 ATM跨行轉 20,000 餘額 17,478→37,478 修
   assert.strictEqual(parsed.transactions[1].type, '收入');
 });
 
-t('fixDirectionByBalance：中信 電匯 36,709 餘額 38,001→0 修正為收入', () => {
+t('fixDirectionByBalance：中信 電匯 36,709 餘額 10,000→46,709 修正為收入', () => {
   const parsed = {
     statementType: '銀行帳戶',
     transactions: [
-      tx({ accountNumber: '', item: '期初', type: '支出', amount: 1, balance: 38001 }),
-      tx({ accountNumber: '', item: '電匯', type: '支出', amount: 36709, balance: 0 })
+      tx({ accountNumber: '', item: '期初', type: '支出', amount: 1, balance: 10000 }),
+      tx({ accountNumber: '', item: '電匯', type: '支出', amount: 36709, balance: 46709 })
     ]
   };
   gs.fixDirectionByBalance(parsed);
@@ -443,7 +443,7 @@ t('checkStatementTotals：淨額 sum(支出)−sum(收入) 相符（玉山式，
 t('checkStatementTotals：毛額與淨額皆不符時記錄 notes（含毛額/淨額字樣）', () => {
   const parsed = {
     statementType: '信用卡', notes: [],
-    statementTotals: [{ currency: 'TWD', newCharges: 0 }],
+    statementTotals: [{ currency: 'TWD', newCharges: 45678 }],
     transactions: [
       tx({ type: '支出', currency: 'TWD', amount: 100 }),
       tx({ type: '支出', currency: 'TWD', amount: 200 }),

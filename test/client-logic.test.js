@@ -51,14 +51,14 @@ t('groupByDate 兩天各自合計，保持輸入順序', () => {
 });
 
 t('formatMoney USD 有分時顯示兩位小數並附幣別', () => {
-  assert.strictEqual(CL.formatMoney(0, 'USD'), '$1,858.62 USD');
+  assert.strictEqual(CL.formatMoney(1234.56, 'USD'), '$1,234.56 USD');
 });
 t('formatMoney TWD 負數整數無小數', () => {
   assert.strictEqual(CL.formatMoney(-3000, 'TWD'), '-$3,000');
 });
 
 t('creditCardLabel 負數（欠款）顯示未繳', () => {
-  assert.strictEqual(CL.creditCardLabel(-0, 'TWD'), '未繳 $0');
+  assert.strictEqual(CL.creditCardLabel(-45678, 'TWD'), '未繳 $45,678');
 });
 t('creditCardLabel 非負（溢繳）顯示溢繳', () => {
   assert.strictEqual(CL.creditCardLabel(100, 'TWD'), '溢繳 $100');

@@ -111,41 +111,41 @@ t('getAccounts：初始餘額為 "200,000" 字串應解析', () => {
 });
 
 t('formatBalanceLine：信用卡顯示「未繳」', () => {
-  const line = gs.formatBalanceLine({ name: '永豐信用卡', type: '信用卡', currency: 'TWD', currentBalance: -0 });
-  assert.strictEqual(line, '永豐信用卡：未繳 $0');
+  const line = gs.formatBalanceLine({ name: '永豐信用卡', type: '信用卡', currency: 'TWD', currentBalance: -45678 });
+  assert.strictEqual(line, '永豐信用卡：未繳 $45,678');
 });
 
 t('formatBalanceLine：銀行帳戶一般顯示', () => {
-  const line = gs.formatBalanceLine({ name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 0 });
-  assert.strictEqual(line, '永豐大戶：$0');
+  const line = gs.formatBalanceLine({ name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 123456 });
+  assert.strictEqual(line, '永豐大戶：$123,456');
 });
 
 t('formatBalanceLine：外幣顯示幣別與小數', () => {
-  const line = gs.formatBalanceLine({ name: '永豐外幣', type: '銀行', currency: 'USD', currentBalance: 0 });
-  assert.strictEqual(line, '永豐外幣：$1,858.62 USD');
+  const line = gs.formatBalanceLine({ name: '永豐外幣', type: '銀行', currency: 'USD', currentBalance: 1234.56 });
+  assert.strictEqual(line, '永豐外幣：$1,234.56 USD');
 });
 
 t('buildAllBalancesReply：分區【資產】【信用卡】', () => {
   const balances = [
-    { name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 0 },
-    { name: '永豐信用卡', type: '信用卡', currency: 'TWD', currentBalance: -0 },
+    { name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 123456 },
+    { name: '永豐信用卡', type: '信用卡', currency: 'TWD', currentBalance: -45678 },
   ];
   const reply = gs.buildAllBalancesReply(balances, '2026/09/06');
   const expected = '💰 帳戶餘額一覽（2026/09/06）'
     + '\n【資產】'
-    + '\n永豐大戶：$0'
+    + '\n永豐大戶：$123,456'
     + '\n【信用卡】'
-    + '\n永豐信用卡：未繳 $0'
+    + '\n永豐信用卡：未繳 $45,678'
     + '\n共 2 個帳戶';
   assert.strictEqual(reply, expected);
 });
 
 t('buildAllBalancesReply：無信用卡帳戶時省略該分區標題', () => {
-  const balances = [{ name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 0 }];
+  const balances = [{ name: '永豐大戶', type: '銀行', currency: 'TWD', currentBalance: 123456 }];
   const reply = gs.buildAllBalancesReply(balances, '2026/09/06');
   const expected = '💰 帳戶餘額一覽（2026/09/06）'
     + '\n【資產】'
-    + '\n永豐大戶：$0'
+    + '\n永豐大戶：$123,456'
     + '\n共 1 個帳戶';
   assert.strictEqual(reply, expected);
 });

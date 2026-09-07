@@ -185,11 +185,11 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
 
   t('buildImportSummary：result.notes 非空時逐行顯示 ℹ 訊息', () => {
     const resultWithNotes = Object.assign({}, result, {
-      notes: ['交割戶買股扣款 1 筆已略過（以證券對帳單為準）', '臺幣解析合計 0 與帳單本期新增款項 22000 不符（差 564），請核對']
+      notes: ['交割戶買股扣款 1 筆已略過（以證券對帳單為準）', '臺幣解析合計 45678 與帳單本期新增款項 22000 不符（差 564），請核對']
     });
     const text = gs2.buildImportSummary(resultWithNotes, 'PDF', outcome);
     assert.ok(text.includes('  ℹ 交割戶買股扣款 1 筆已略過（以證券對帳單為準）'), text);
-    assert.ok(text.includes('  ℹ 臺幣解析合計 0 與帳單本期新增款項 22000 不符（差 564），請核對'), text);
+    assert.ok(text.includes('  ℹ 臺幣解析合計 45678 與帳單本期新增款項 22000 不符（差 564），請核對'), text);
   });
 
   t('buildImportSummary：result.notes 未提供時不顯示 ℹ 行', () => {

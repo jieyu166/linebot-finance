@@ -96,8 +96,8 @@ t('upsertDefaultAccounts 對帳戶管理 J 欄整欄套用純文字格式', () =
   assert.ok(jCalls.length >= 1, 'setNumberFormat("@") 應被呼叫在第 10 欄（J）');
 });
 const OVERRIDE_LIST = [
-  { name: '玉山', balance: 0, date: '2026/08/31' },
-  { name: '台新', balance: 0, date: '2026/08/31' },
+  { name: '玉山', balance: 11111, date: '2026/08/31' },
+  { name: '台新', balance: 22222, date: '2026/08/31' },
   { name: '不存在的帳戶', balance: 100, date: '2026/08/31' }
 ];
 
@@ -119,9 +119,9 @@ t('previewInitialBalances 不改資料，回傳 skipped 數', () => {
 t('applyInitialBalances 寫入 D/E 欄，略過未知帳戶，回傳 applied/skipped', () => {
   const sheet = balancesFixtureSheet();
   const result = gs.applyInitialBalances(OVERRIDE_LIST, ss(sheet));
-  assert.strictEqual(sheet._data[1][3], 0);
+  assert.strictEqual(sheet._data[1][3], 11111);
   assert.strictEqual(sheet._data[1][4], '2026/08/31');
-  assert.strictEqual(sheet._data[2][3], 0);
+  assert.strictEqual(sheet._data[2][3], 22222);
   assert.strictEqual(sheet._data[2][4], '2026/08/31');
   assert.deepStrictEqual(result, { applied: 2, skipped: 1 });
 });
