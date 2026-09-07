@@ -13,12 +13,44 @@ function include(name) {
 }
 
 /**
+ * 判斷目前呼叫者是否有權限使用網頁 App：
+ * 於「只有我自己」部署時，Session.getActiveUser() 會回傳擁有者本人的 email，
+ * 與 Session.getEffectiveUser()（腳本擁有者）相同；否則（例如 LINE 用的「所有人」部署）
+ * getActiveUser() 會是空字串。另外提供 Script Property WEBAPP_TOKEN 作為備援：
+ * 網址加 &t=token 亦可放行（未設定 WEBAPP_TOKEN 時此路徑一律不通過）。
+ * @param {string} token - 呼叫端提供的權杖（doGet 的 e.parameter.t 或 App.html 傳入的第一個參數）
+ * @returns {boolean}
+ */
+function webAppAccessAllowed(token) {
+  var activeEmail = '';
+  try { activeEmail = Session.getActiveUser().getEmail(); } catch (e) { activeEmail = ''; }
+  var effectiveEmail = '';
+  try { effectiveEmail = Session.getEffectiveUser().getEmail(); } catch (e) { effectiveEmail = ''; }
+  if (activeEmail && activeEmail === effectiveEmail) { return true; }
+
+  var configuredToken = getConfig('WEBAPP_TOKEN');
+  if (configuredToken && String(configuredToken).trim() !== '' && token === configuredToken) { return true; }
+
+  return false;
+}
+
+/**
+ * 權限檢查未通過時拋出錯誤；供每個 api* 函式在做任何事之前呼叫
+ * @param {string} token - 呼叫端提供的權杖
+ */
+function requireWebAppAccess(token) {
+  if (!webAppAccessAllowed(token)) { throw new Error('無權限使用此 App'); }
+}
+
+/**
  * 網頁 App 初始化資料：分類、帳戶、預算、今日日期
+ * @param {string} auth - 權限權杖
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object} { expenseCategories, incomeCategories, accounts, budgets, today }
  */
-function apiBootstrap(ss) {
+function apiBootstrap(auth, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     var toCategoryView = function(c) { return { name: c.name, icon: c.icon, color: c.color }; };
     var toAccountView = function(a) { return { name: a.name, institution: a.institution, currency: a.currency, type: a.type }; };
@@ -46,12 +78,14 @@ function loadAllTransactions_(ss) {
 
 /**
  * 依月份取得交易清單，每筆加上 linkedAccount（配對對方帳戶名或空字串）
+ * @param {string} auth - 權限權杖
  * @param {string} yearMonth - 'yyyy-MM'
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object[]}
  */
-function apiListTransactions(yearMonth, ss) {
+function apiListTransactions(auth, yearMonth, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     var all = loadAllTransactions_(ss);
     var byTransfer = {};
@@ -78,12 +112,14 @@ function apiListTransactions(yearMonth, ss) {
 /**
  * 新增或更新一筆交易；驗證金額、類型、分類、帳戶，機構自動帶入；
  * 新增列若分類為 繳信用卡／轉帳，會嘗試自動配對對方帳戶
+ * @param {string} auth - 權限權杖
  * @param {Object} tx - 交易物件（有 id 則更新，否則新增）
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object} 儲存後的交易物件
  */
-function apiSaveTransaction(tx, ss) {
+function apiSaveTransaction(auth, tx, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     var amount = parseAmount(tx.amount);
     if (!(amount > 0)) { throw new Error('金額必須大於 0'); }
@@ -96,6 +132,7 @@ function apiSaveTransaction(tx, ss) {
     for (var k in tx) { payload[k] = tx[k]; }
     payload.institution = account.institution;
     payload.amount = amount;
+    payload.currency = account.currency;
 
     var written;
     if (!payload.id) {
@@ -116,13 +153,15 @@ function apiSaveTransaction(tx, ss) {
 
 /**
  * 刪除一筆交易
+ * @param {string} auth - 權限權杖
  * @param {string} id - 交易 ID
  * @param {boolean} alsoLinked - 是否一併刪除配對的轉帳交易
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object} { deleted: number }
  */
-function apiDeleteTransaction(id, alsoLinked, ss) {
+function apiDeleteTransaction(auth, id, alsoLinked, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return deleteTransactionById(id, alsoLinked, ss);
   } catch (e) {
@@ -132,12 +171,14 @@ function apiDeleteTransaction(id, alsoLinked, ss) {
 
 /**
  * 建立一組轉帳交易（轉出＋轉入）
+ * @param {string} auth - 權限權杖
  * @param {Object} params - { fromAccount, toAccount, amount, date, note, toAmount }
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object[]}
  */
-function apiCreateTransfer(params, ss) {
+function apiCreateTransfer(auth, params, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return createTransfer(params, ss);
   } catch (e) {
@@ -147,13 +188,15 @@ function apiCreateTransfer(params, ss) {
 
 /**
  * 手動連結兩筆交易為轉帳
+ * @param {string} auth - 權限權杖
  * @param {string} idA
  * @param {string} idB
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {string} 轉帳ID
  */
-function apiLinkTransfer(idA, idB, ss) {
+function apiLinkTransfer(auth, idA, idB, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return linkTransfer(idA, idB, ss);
   } catch (e) {
@@ -163,12 +206,14 @@ function apiLinkTransfer(idA, idB, ss) {
 
 /**
  * 解除轉帳配對
+ * @param {string} auth - 權限權杖
  * @param {string} transferId
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {number} 清除的交易列數
  */
-function apiUnlinkTransfer(transferId, ss) {
+function apiUnlinkTransfer(auth, transferId, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return unlinkTransfer(transferId, ss);
   } catch (e) {
@@ -178,12 +223,14 @@ function apiUnlinkTransfer(transferId, ss) {
 
 /**
  * 取得手動轉帳配對候選（7 天內、不限分類，含 rowIndex）
+ * @param {string} auth - 權限權杖
  * @param {string} id - 目標交易 ID
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object[]}
  */
-function apiTransferCandidates(id, ss) {
+function apiTransferCandidates(auth, id, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     var accounts = getAccounts(ss);
     var all = loadAllTransactions_(ss);
@@ -198,13 +245,15 @@ function apiTransferCandidates(id, ss) {
 
 /**
  * 依月份、類型彙總分類金額與占比
+ * @param {string} auth - 權限權杖
  * @param {string} yearMonth - 'yyyy-MM'
  * @param {string} type - '支出' 或 '收入'
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object} { total, byCategory }
  */
-function apiStats(yearMonth, type, ss) {
+function apiStats(auth, yearMonth, type, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return summarizeByCategory(filterTransactionsByMonth(loadAllTransactions_(ss), yearMonth), type);
   } catch (e) {
@@ -214,12 +263,14 @@ function apiStats(yearMonth, type, ss) {
 
 /**
  * 依月份彙總預算使用狀況
+ * @param {string} auth - 權限權杖
  * @param {string} yearMonth - 'yyyy-MM'
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object[]}
  */
-function apiBudgetUsage(yearMonth, ss) {
+function apiBudgetUsage(auth, yearMonth, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return summarizeBudgetUsage(loadAllTransactions_(ss), getBudgets(ss), yearMonth);
   } catch (e) {
@@ -229,12 +280,14 @@ function apiBudgetUsage(yearMonth, ss) {
 
 /**
  * 新增、更新或刪除預算
+ * @param {string} auth - 權限權杖
  * @param {Object} params - { kind, name, amount }
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object} { rowIndex, deleted }
  */
-function apiSaveBudget(params, ss) {
+function apiSaveBudget(auth, params, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return upsertBudget(params, ss);
   } catch (e) {
@@ -244,11 +297,13 @@ function apiSaveBudget(params, ss) {
 
 /**
  * 取得所有啟用帳戶目前餘額
+ * @param {string} auth - 權限權杖
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object[]}
  */
-function apiBalances(ss) {
+function apiBalances(auth, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return getAllAccountBalances(ss);
   } catch (e) {
@@ -258,13 +313,15 @@ function apiBalances(ss) {
 
 /**
  * 更新帳戶設定
+ * @param {string} auth - 權限權杖
  * @param {string} name - 帳戶名稱
  * @param {Object} params - { initialBalance, initialDate, type }
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {number} 更新的列號
  */
-function apiSaveAccount(name, params, ss) {
+function apiSaveAccount(auth, name, params, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     return updateAccountSettings(name, params, ss);
   } catch (e) {
@@ -274,12 +331,14 @@ function apiSaveAccount(name, params, ss) {
 
 /**
  * 新增或更新分類（可更名）；更名時一併更新既有交易與預算的分類名稱
+ * @param {string} auth - 權限權杖
  * @param {Object} params - { type, name, icon, color, oldName }
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object} { rowIndex, renamed, changedTransactions?, changedBudgets? }
  */
-function apiSaveCategory(params, ss) {
+function apiSaveCategory(auth, params, ss) {
   try {
+    requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
     var sheetName = params.type === '支出' ? '支出分類' : '收入分類';
     var oldName = String(params.oldName || '').trim();
@@ -287,7 +346,7 @@ function apiSaveCategory(params, ss) {
     if (oldName !== '' && oldName !== name) {
       // 先透過 apiRenameCategory 做「唯一一次」原子改名（本身自帶鎖）：
       // 交易／預算改名，以及分類表本身該列的 A 欄改名，皆在同一把鎖內完成。
-      var renameResult = apiRenameCategory(params.type, oldName, name, ss);
+      var renameResult = apiRenameCategory(auth, params.type, oldName, name, ss);
       // 分類表該列已改名為 name，這裡不再傳 oldName，只用來更新 icon/color，
       // 不會誤判成「重複」（目標列就是剛剛被改名的那一列）。
       var upsertParams = { name: params.name, icon: params.icon, color: params.color };
@@ -306,13 +365,15 @@ function apiSaveCategory(params, ss) {
  * 將指定類型的分類名稱原子性改名：同步更新交易紀錄 E 欄、預算表（kind='分類'）B 欄，
  * 以及分類表本身該列的 A 欄。全程（讀＋寫）都在同一把 LockService 鎖內完成，避免
  * TOCTOU（鎖外讀到的資料在鎖內寫入前被其他呼叫改動）。
+ * @param {string} auth - 權限權杖
  * @param {string} type - '支出' 或 '收入'（交易紀錄 D 欄／分類表）
  * @param {string} oldName - 舊分類名稱
  * @param {string} newName - 新分類名稱
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object} { changedTransactions, changedBudgets, categoryRow }
  */
-function apiRenameCategory(type, oldName, newName, ss) {
+function apiRenameCategory(auth, type, oldName, newName, ss) {
+  requireWebAppAccess(auth);
   ss = getSpreadsheet(ss);
   var trimmedOldName = String(oldName || '').trim();
   var trimmedNewName = String(newName || '').trim();
@@ -343,7 +404,7 @@ function apiRenameCategory(type, oldName, newName, ss) {
 
     var budgetSheet = ss.getSheetByName('預算');
     var budgetsToChange = getBudgets(ss).filter(function(b) {
-      return b.kind === '分類' && b.name === trimmedOldName;
+      return b.kind === '分類' && normalizeName(b.name) === normalizeName(trimmedOldName);
     });
 
     replaced.changedRowIndexes.forEach(function(rowIndex) {

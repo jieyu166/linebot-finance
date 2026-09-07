@@ -54,7 +54,11 @@ function loadGs(files, extraGlobals) {
     }
   };
   const ContentService = { createTextOutput: function(s) { return { _text: s }; } };
-  const injected = Object.assign({ Utilities: utilities, Logger, LockService, HtmlService, ContentService, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
+  const Session = {
+    getActiveUser: function() { return { getEmail: function() { return 'owner@example.com'; } }; },
+    getEffectiveUser: function() { return { getEmail: function() { return 'owner@example.com'; } }; }
+  };
+  const injected = Object.assign({ Utilities: utilities, Logger, LockService, HtmlService, ContentService, Session, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
 
   const injectedKeys = Object.keys(injected);
   injectedKeys.forEach(function(k) { global[k] = injected[k]; });

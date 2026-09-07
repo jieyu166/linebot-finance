@@ -33,7 +33,7 @@
    * 改呼叫 mock 而不觸發 google.script.run。
    */
   function api(name) {
-    var args = Array.prototype.slice.call(arguments, 1);
+    var args = [window.__WEBAPP_TOKEN || ''].concat(Array.prototype.slice.call(arguments, 1));
     return new Promise(function (resolve, reject) {
       if (typeof window.__mockApi === 'function') {
         Promise.resolve(window.__mockApi(name, args)).then(resolve, reject);
@@ -530,7 +530,7 @@
   function doLinkPick(pickedId) {
     var ed = state.editing;
     if (!ed || !ed.id || !pickedId) { return; }
-    if (!confirm('連結這兩筆為轉帳？')) { return; }
+    if (!confirm('連結這兩筆為轉帳？兩筆的分類都會改成「轉帳」，解除連結後不會自動還原。')) { return; }
     api('apiLinkTransfer', ed.id, pickedId).then(function () {
       invalidateDerived();
       closeEditor();
@@ -1055,7 +1055,12 @@
     var balanceEl = document.getElementById('acc-balance');
     var dateEl = document.getElementById('acc-date');
     var typeEl = document.getElementById('acc-type');
-    var balance = Number(balanceEl ? balanceEl.value : '');
+    var balanceValue = balanceEl ? balanceEl.value : '';
+    if (String(balanceValue).trim() === '') {
+      toast('金額不正確', true);
+      return;
+    }
+    var balance = Number(balanceValue);
     if (isNaN(balance)) {
       toast('初始餘額不正確', true);
       return;
@@ -1067,13 +1072,13 @@
     };
     api('apiSaveAccount', sheet.name, params).then(function () {
       state.accountSheet = null;
-      toast('已儲存');
       return Promise.all([
         loadBalances(),
         api('apiBootstrap').then(function (bs) { state.bootstrap = bs; })
       ]);
     }).then(function () {
       render();
+      toast('已儲存');
     }).catch(function (err) {
       toast((err && err.message) || String(err), true);
     });
@@ -1147,11 +1152,13 @@
     api('apiSaveCategory', { type: sheet.type, name: name, icon: icon, color: color, oldName: sheet.oldName }).then(function () {
       state.catSheet = null;
       invalidateDerived();
-      toast('已儲存');
       return api('apiBootstrap');
     }).then(function (bs) {
       state.bootstrap = bs;
+      return loadMonth();
+    }).then(function () {
       render();
+      toast('已儲存');
     }).catch(function (err) {
       toast((err && err.message) || String(err), true);
     });

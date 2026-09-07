@@ -49,7 +49,8 @@ function initializeProperties() {
     'OPENAI_API_KEY': '請替換為你的 OpenAI API Key',
     'LINE_CHANNEL_SECRET': '請替換為你的 LINE Channel Secret',
     'LINE_CHANNEL_ACCESS_TOKEN': '請替換為你的 LINE Channel Access Token',
-    'SHEET_ID': '請替換為你的 Google 試算表 ID'
+    'SHEET_ID': '請替換為你的 Google 試算表 ID',
+    'WEBAPP_TOKEN': '（選填）自訂一串隨機字串，App 網址加 &t=該字串 可繞過身分檢查'
   });
   Logger.log('Script Properties 已初始化，請確認已替換為實際值');
 }
