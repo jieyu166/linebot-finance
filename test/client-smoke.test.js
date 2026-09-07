@@ -30,6 +30,22 @@ t('App.html 含必要字串：apiBootstrap、apiListTransactions、renderRecords
   });
 });
 
+t('App.html 含新增／編輯頁必要字串：openEditor、closeEditor、四個交易 API、鍵盤、evalCalc', () => {
+  var body = extractScriptBody(readSrc('App.html'));
+  [
+    'openEditor',
+    'closeEditor',
+    'apiSaveTransaction',
+    'apiCreateTransfer',
+    'apiDeleteTransaction',
+    'apiUnlinkTransfer',
+    'data-action="key"',
+    'CL.evalCalc'
+  ].forEach(function (needle) {
+    assert.ok(body.indexOf(needle) !== -1, '缺少字串: ' + needle);
+  });
+});
+
 t('Index.html 包含三個 include 與 #app', () => {
   var html = readSrc('Index.html');
   assert.ok(html.indexOf("include('Styles')") !== -1, '缺少 include(\'Styles\')');

@@ -98,4 +98,14 @@ t('inferYearMonthLabel 格式化', () => {
   assert.strictEqual(CL.inferYearMonthLabel('2026-08'), '2026/08');
 });
 
+t('toIsoDate 轉為 <input type=date> 格式', () => {
+  assert.strictEqual(CL.toIsoDate('2026/08/03'), '2026-08-03');
+  assert.strictEqual(CL.toIsoDate(''), '');
+});
+
+t('fromIsoDate 轉回後端格式', () => {
+  assert.strictEqual(CL.fromIsoDate('2026-08-03'), '2026/08/03');
+  assert.strictEqual(CL.fromIsoDate(''), '');
+});
+
 process.exit(failed ? 1 : 0);

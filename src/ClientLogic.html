@@ -179,6 +179,18 @@
     return parts[0] + '/' + parts[1];
   }
 
+  // 'yyyy/MM/dd' -> 'yyyy-MM-dd'（供 <input type="date"> 使用）
+  function toIsoDate(s) {
+    if (!s) return '';
+    return String(s).replace(/\//g, '-');
+  }
+
+  // 'yyyy-MM-dd' -> 'yyyy/MM/dd'（<input type="date"> 值轉回後端格式）
+  function fromIsoDate(s) {
+    if (!s) return '';
+    return String(s).replace(/-/g, '/');
+  }
+
   window.CL = {
     evalCalc: evalCalc,
     groupByDate: groupByDate,
@@ -187,7 +199,9 @@
     budgetColor: budgetColor,
     defaultColor: defaultColor,
     yearMonthShift: yearMonthShift,
-    inferYearMonthLabel: inferYearMonthLabel
+    inferYearMonthLabel: inferYearMonthLabel,
+    toIsoDate: toIsoDate,
+    fromIsoDate: fromIsoDate
   };
 })();
 </script>

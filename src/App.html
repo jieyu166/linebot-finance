@@ -65,9 +65,433 @@
     render();
   }
 
+  /* ---------------- 新增／編輯頁（Task 6） ---------------- */
+
+  var lastUsedAccount = '';
+  var KEY_ROWS = [
+    ['7', '8', '9', '÷'],
+    ['4', '5', '6', '×'],
+    ['1', '2', '3', '−'],
+    ['.', '0', '⌫', '+']
+  ];
+  var MODES = [
+    { key: 'expense', label: '支出' },
+    { key: 'income', label: '收入' },
+    { key: 'transfer', label: '轉帳' }
+  ];
+
+  function accountsList() {
+    return (state.bootstrap && state.bootstrap.accounts) || [];
+  }
+
+  function findAccountView(name) {
+    var list = accountsList();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].name === name) { return list[i]; }
+    }
+    return null;
+  }
+
+  function pickDefaultAccount() {
+    var list = accountsList();
+    if (lastUsedAccount && findAccountView(lastUsedAccount)) { return lastUsedAccount; }
+    var cash = list.filter(function (a) { return a.name === '現金'; })[0];
+    if (cash) { return cash.name; }
+    return list.length ? list[0].name : '';
+  }
+
+  function needsToAmount(ed) {
+    var from = findAccountView(ed.fromAccount);
+    var to = findAccountView(ed.toAccount);
+    return !!(from && to && from.currency && to.currency && from.currency !== to.currency);
+  }
+
+  function ensureEditorContainer() {
+    var el = document.getElementById('editor');
+    if (el) { return el; }
+    el = document.createElement('div');
+    el.id = 'editor';
+    document.body.appendChild(el);
+    el.addEventListener('click', onEditorClick);
+    el.addEventListener('input', onEditorFieldInput);
+    el.addEventListener('change', onEditorFieldChange);
+    return el;
+  }
+
   function openEditor(tx) {
-    // Task 6 實作；此任務先給提示
-    toast('編輯功能下一版');
+    ensureEditorContainer();
+    var bs = state.bootstrap;
+    var today = (bs && bs.today) || '';
+
+    if (tx) {
+      state.editing = {
+        mode: tx.type === '收入' ? 'income' : 'expense',
+        id: tx.id,
+        date: tx.date || today,
+        account: tx.account || '',
+        category: tx.category || '',
+        item: tx.item || '',
+        description: tx.description || '',
+        amount: tx.amount,
+        expr: String(tx.amount == null ? '' : tx.amount),
+        transferId: tx.transferId || '',
+        fromAccount: '',
+        toAccount: '',
+        toAmount: ''
+      };
+    } else {
+      var defaultAccount = pickDefaultAccount();
+      var accounts = accountsList();
+      var secondAccount = accounts.filter(function (a) { return a.name !== defaultAccount; })[0];
+      state.editing = {
+        mode: 'expense',
+        id: '',
+        date: today,
+        account: defaultAccount,
+        category: '',
+        item: '',
+        description: '',
+        amount: '',
+        expr: '',
+        transferId: '',
+        fromAccount: defaultAccount,
+        toAccount: secondAccount ? secondAccount.name : '',
+        toAmount: ''
+      };
+    }
+    renderEditor();
+  }
+
+  function closeEditor() {
+    state.editing = null;
+    var el = document.getElementById('editor');
+    if (el) { el.innerHTML = ''; }
+  }
+
+  function catIconColor(cat, index) {
+    var icon = (cat && cat.icon) || (cat && cat.name ? String(cat.name).charAt(0) : '?');
+    var color = (cat && cat.color) || CL.defaultColor(index);
+    return { icon: icon, color: color };
+  }
+
+  function renderCategoryGrid(ed) {
+    var bs = state.bootstrap;
+    var list = ed.mode === 'expense'
+      ? ((bs && bs.expenseCategories) || [])
+      : ((bs && bs.incomeCategories) || []);
+    var html = '<div class="catgrid">';
+    list.forEach(function (cat, index) {
+      var ic = catIconColor(cat, index);
+      var selected = cat.name === ed.category ? ' selected' : '';
+      html += '<div class="cat-chip' + selected + '" data-action="pick-cat" data-cat="' + esc(cat.name) + '">' +
+        '<span class="cat-icon" style="background:' + esc(ic.color) + '">' + esc(ic.icon) + '</span>' +
+        '<span class="cat-name">' + esc(cat.name) + '</span>' +
+        '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function renderAccountOptions(selected) {
+    return accountsList().map(function (a) {
+      var sel = a.name === selected ? ' selected' : '';
+      return '<option value="' + esc(a.name) + '"' + sel + '>' + esc(a.name) + '</option>';
+    }).join('');
+  }
+
+  function renderEditorFields(ed) {
+    var html = '';
+    if (ed.mode === 'transfer') {
+      html += renderTransferFields(ed);
+    } else {
+      html += renderCategoryGrid(ed);
+      html += '<div class="field"><label>帳戶</label><select id="ed-account">' +
+        renderAccountOptions(ed.account) + '</select></div>';
+      html += '<div class="field"><label>日期</label><input type="date" id="ed-date" value="' +
+        esc(CL.toIsoDate(ed.date)) + '"></div>';
+      html += '<div class="field"><label>品項</label><input type="text" id="ed-item" placeholder="品項" value="' +
+        esc(ed.item) + '"></div>';
+      html += '<div class="field"><label>備註</label><input type="text" id="ed-desc" placeholder="備註" value="' +
+        esc(ed.description) + '"></div>';
+    }
+    return html;
+  }
+
+  function renderTransferFields(ed) {
+    var html = '';
+    html += '<div class="field"><label>轉出帳戶</label><select id="ed-from">' +
+      renderAccountOptions(ed.fromAccount) + '</select></div>';
+    html += '<div class="field"><label>轉入帳戶</label><select id="ed-to">' +
+      renderAccountOptions(ed.toAccount) + '</select></div>';
+    html += '<div class="field"><label>日期</label><input type="date" id="ed-date" value="' +
+      esc(CL.toIsoDate(ed.date)) + '"></div>';
+    html += '<div class="field"><label>備註</label><input type="text" id="ed-desc" placeholder="備註" value="' +
+      esc(ed.description) + '"></div>';
+    if (needsToAmount(ed)) {
+      html += '<div class="field"><label>轉入金額</label><input type="number" id="ed-toamount" value="' +
+        esc(ed.toAmount) + '"></div>';
+    }
+    return html;
+  }
+
+  function renderEditorFooter(ed) {
+    if (!ed.id) { return ''; }
+    var html = '<div class="editor-footer">';
+    html += '<button class="btn-delete" data-action="delete">刪除</button>';
+    if (ed.transferId) {
+      html += '<button class="btn-unlink" data-action="unlink">解除連結</button>';
+    } else {
+      html += '<button class="btn-link" data-action="link">連結為轉帳</button>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function buildEditorHtml() {
+    var ed = state.editing;
+    var html = '<div class="editor">';
+    html += '<div class="editor-header">' +
+      '<button class="editor-close" data-action="close">✕</button>' +
+      '<div class="editor-title">' + (ed.id ? '編輯' : '新增') + '</div>' +
+      '<div class="editor-header-spacer"></div>' +
+      '</div>';
+
+    html += '<div class="segment">';
+    MODES.forEach(function (m) {
+      var active = ed.mode === m.key ? ' active' : '';
+      var disabled = ed.id ? ' disabled' : '';
+      html += '<button class="' + active + '" data-action="set-mode" data-mode="' + m.key + '"' + disabled + '>' +
+        m.label + '</button>';
+    });
+    html += '</div>';
+
+    html += '<div class="amount-display">' + esc(ed.expr || '0') + '</div>';
+
+    html += '<div class="keypad">';
+    KEY_ROWS.forEach(function (row) {
+      row.forEach(function (k) {
+        html += '<button class="key" data-action="key" data-key="' + esc(k) + '">' + esc(k) + '</button>';
+      });
+    });
+    html += '</div>';
+    html += '<div class="keypad-actions">' +
+      '<button class="key-eq" data-action="calc">=</button>' +
+      '<button class="key-save" data-action="save">儲存</button>' +
+      '</div>';
+
+    html += renderEditorFields(ed);
+    html += renderEditorFooter(ed);
+    html += '</div>';
+    return html;
+  }
+
+  function renderEditor() {
+    var el = ensureEditorContainer();
+    if (!state.editing) { el.innerHTML = ''; return; }
+    el.innerHTML = buildEditorHtml();
+  }
+
+  function updateAmountDisplay() {
+    var el = document.querySelector('#editor .amount-display');
+    if (el) { el.textContent = state.editing.expr || '0'; }
+  }
+
+  function updateCategorySelection() {
+    var chips = document.querySelectorAll('#editor .cat-chip');
+    for (var i = 0; i < chips.length; i++) {
+      var chip = chips[i];
+      if (chip.getAttribute('data-cat') === state.editing.category) {
+        chip.classList.add('selected');
+      } else {
+        chip.classList.remove('selected');
+      }
+    }
+  }
+
+  function readFieldIntoState(target) {
+    var ed = state.editing;
+    if (!ed || !target || !target.id) { return; }
+    switch (target.id) {
+      case 'ed-account': ed.account = target.value; break;
+      case 'ed-from': ed.fromAccount = target.value; break;
+      case 'ed-to': ed.toAccount = target.value; break;
+      case 'ed-date': ed.date = CL.fromIsoDate(target.value); break;
+      case 'ed-item': ed.item = target.value; break;
+      case 'ed-desc': ed.description = target.value; break;
+      case 'ed-toamount': ed.toAmount = target.value; break;
+      default: break;
+    }
+  }
+
+  function onEditorFieldInput(e) {
+    readFieldIntoState(e.target);
+  }
+
+  function onEditorFieldChange(e) {
+    readFieldIntoState(e.target);
+    if (e.target.id === 'ed-from' || e.target.id === 'ed-to') {
+      renderEditor();
+    }
+  }
+
+  function doCalc() {
+    var val = CL.evalCalc(state.editing.expr);
+    if (isNaN(val) || val <= 0) {
+      toast('金額不正確', true);
+      return;
+    }
+    state.editing.expr = String(val);
+    state.editing.amount = val;
+    updateAmountDisplay();
+  }
+
+  function doSave() {
+    var ed = state.editing;
+    var val = CL.evalCalc(ed.expr);
+    if (isNaN(val) || val <= 0) {
+      toast('金額不正確', true);
+      return;
+    }
+
+    if (ed.mode === 'transfer') {
+      if (!ed.fromAccount || !ed.toAccount) {
+        toast('請選擇轉出與轉入帳戶', true);
+        return;
+      }
+      if (ed.fromAccount === ed.toAccount) {
+        toast('轉出與轉入帳戶不可相同', true);
+        return;
+      }
+      var params = {
+        fromAccount: ed.fromAccount,
+        toAccount: ed.toAccount,
+        amount: val,
+        date: ed.date || (state.bootstrap && state.bootstrap.today) || '',
+        note: ed.description || ''
+      };
+      if (needsToAmount(ed)) {
+        var toAmt = Number(ed.toAmount);
+        if (!(toAmt > 0)) {
+          toast('請輸入轉入金額', true);
+          return;
+        }
+        params.toAmount = toAmt;
+      }
+      api('apiCreateTransfer', params).then(function () {
+        closeEditor();
+        return loadMonth();
+      }).then(function () {
+        render();
+        toast('已儲存');
+      }).catch(function (err) {
+        toast((err && err.message) || String(err), true);
+      });
+      return;
+    }
+
+    if (!ed.category) {
+      toast('請選擇分類', true);
+      return;
+    }
+    if (!ed.account) {
+      toast('請選擇帳戶', true);
+      return;
+    }
+    var payload = {
+      date: ed.date || (state.bootstrap && state.bootstrap.today) || '',
+      account: ed.account,
+      type: ed.mode === 'expense' ? '支出' : '收入',
+      category: ed.category,
+      item: ed.item || '',
+      description: ed.description || '',
+      amount: val
+    };
+    if (ed.id) { payload.id = ed.id; }
+
+    api('apiSaveTransaction', payload).then(function (saved) {
+      lastUsedAccount = ed.account;
+      closeEditor();
+      return loadMonth().then(function () {
+        render();
+        toast('已儲存' + (saved && saved.autoPaired ? '（已自動配對）' : ''));
+      });
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+    });
+  }
+
+  function doDelete() {
+    var ed = state.editing;
+    if (!ed || !ed.id) { return; }
+    var alsoLinked = false;
+    if (ed.transferId) {
+      alsoLinked = !!confirm('此筆為轉帳配對，要一併刪除對方那筆嗎？');
+    } else if (!confirm('確定刪除？')) {
+      return;
+    }
+    api('apiDeleteTransaction', ed.id, alsoLinked).then(function () {
+      closeEditor();
+      return loadMonth();
+    }).then(function () {
+      render();
+      toast('已刪除');
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+    });
+  }
+
+  function doUnlink() {
+    var ed = state.editing;
+    if (!ed || !ed.transferId) { return; }
+    api('apiUnlinkTransfer', ed.transferId).then(function () {
+      closeEditor();
+      return loadMonth();
+    }).then(function () {
+      render();
+      toast('已解除連結');
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+    });
+  }
+
+  function onEditorClick(e) {
+    var el = e.target.closest ? e.target.closest('[data-action]') : null;
+    if (!el) { return; }
+    var action = el.getAttribute('data-action');
+    var ed = state.editing;
+    if (!ed) { return; }
+
+    if (action === 'close') {
+      closeEditor();
+    } else if (action === 'set-mode') {
+      if (ed.id) {
+        toast('轉帳配對請用解除連結後重建', true);
+        return;
+      }
+      ed.mode = el.getAttribute('data-mode');
+      renderEditor();
+    } else if (action === 'key') {
+      var k = el.getAttribute('data-key');
+      if (k === '⌫') {
+        ed.expr = (ed.expr || '').slice(0, -1);
+      } else {
+        ed.expr = (ed.expr || '') + k;
+      }
+      updateAmountDisplay();
+    } else if (action === 'calc') {
+      doCalc();
+    } else if (action === 'pick-cat') {
+      ed.category = el.getAttribute('data-cat');
+      updateCategorySelection();
+    } else if (action === 'save') {
+      doSave();
+    } else if (action === 'delete') {
+      doDelete();
+    } else if (action === 'unlink') {
+      doUnlink();
+    } else if (action === 'link') {
+      toast('連結功能下一版');
+    }
   }
 
   function loadMonth() {
@@ -253,6 +677,7 @@
   document.addEventListener('DOMContentLoaded', function () {
     var app = document.getElementById('app');
     if (app) { app.addEventListener('click', onAppClick); }
+    ensureEditorContainer();
     init();
   });
 
@@ -264,7 +689,9 @@
     setTab: setTab,
     loadMonth: loadMonth,
     init: init,
-    renderRecords: renderRecords
+    renderRecords: renderRecords,
+    openEditor: openEditor,
+    closeEditor: closeEditor
   };
 })();
 </script>
