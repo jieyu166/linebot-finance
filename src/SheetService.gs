@@ -134,7 +134,11 @@ function getAccounts(ss) {
         active: activeValue === true || String(activeValue).toUpperCase() === 'TRUE',
         type: rawType || (name.indexOf('現金') >= 0 ? '現金' : '銀行'),
         debitAccount: String(row[8] || '').trim(),
-        accountNumberHints: String(row[9] || '').split(/[,，、]/).map(function(s) { return s.trim(); }).filter(function(s) { return s !== ''; })
+        // J 欄若被 Google Sheets 解析成數字（帳號識別 hint 字串如 "0015977,0381979" 遭
+        // 誤判為千分位數字、前導零與部分位數會遺失），視為壞資料，一律回傳空陣列，
+        // 避免把已損毀的數字拆成錯誤的 hints。
+        accountNumberHints: typeof row[9] === 'number' ? [] :
+          String(row[9] || '').split(/[,，、]/).map(function(s) { return s.trim(); }).filter(function(s) { return s !== ''; })
       };
     })
     .filter(function(account) {
@@ -450,4 +454,139 @@ function appendTransactionsBatch(transactions, source, ss) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * 列出指定帳戶會被計入餘額的所有交易列，依日期由舊到新排序
+ * @param {string} accountName - 帳戶名稱
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object[]} { rowIndex, date, type, category, item, amount, currency, source, transferId }
+ */
+function listAccountTransactions(accountName, ss) {
+  ss = getSpreadsheet(ss);
+  var accounts = getAccounts(ss);
+  var account = findAccountByName(accounts, accountName);
+  if (!account) { return []; }
+
+  var rows = getTransactionRows(ss);
+  var list = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (!shouldIncludeTransaction(account, row)) { continue; }
+    var tx = rowToTransaction(row, i + 2);
+    list.push({
+      rowIndex: tx.rowIndex,
+      date: tx.date,
+      type: tx.type,
+      category: tx.category,
+      item: tx.item,
+      amount: tx.amount,
+      currency: tx.currency,
+      source: tx.source,
+      transferId: tx.transferId
+    });
+  }
+  list.sort(function(a, b) {
+    var da = parseSheetDate(a.date);
+    var db = parseSheetDate(b.date);
+    var ta = da ? da.getTime() : 0;
+    var tb = db ? db.getTime() : 0;
+    if (ta !== tb) { return ta - tb; }
+    return a.rowIndex - b.rowIndex;
+  });
+  return list;
+}
+
+/**
+ * 除錯用：在 GAS 編輯器手動執行，依日期列出指定帳戶每筆計入餘額的交易明細
+ * @param {string} [accountName] - 帳戶名稱，未填則用「永豐信用卡」
+ */
+function printAccountTransactions(accountName) {
+  accountName = accountName || '永豐信用卡';
+  var ss = getSpreadsheet();
+  var accounts = getAccounts(ss);
+  var account = findAccountByName(accounts, accountName);
+  if (!account) {
+    Logger.log('找不到啟用帳戶：' + accountName + '；可用：' + accounts.map(function(a) { return a.name; }).join('、'));
+    return;
+  }
+
+  var list = listAccountTransactions(accountName, ss);
+  var income = 0;
+  var expense = 0;
+  list.forEach(function(tx) {
+    Logger.log('第 ' + tx.rowIndex + ' 列 | ' + tx.date + ' | ' + tx.type + ' | ' + tx.category + ' | ' + tx.item + ' | ' +
+      tx.amount + ' | ' + tx.source + ' | ' + String(tx.transferId || '').slice(0, 8));
+    if (tx.type === '收入') { income += tx.amount; }
+    else if (tx.type === '支出') { expense += tx.amount; }
+  });
+  var balance = account.initialBalance + income - expense;
+  Logger.log('共 ' + list.length + ' 筆，收入合計 ' + income + '，支出合計 ' + expense + '，初始 ' + account.initialBalance + '，餘額 ' + balance);
+}
+
+/** 交易「來源」欄視為自動化匯入的固定值；其餘一律歸類為「手動」 */
+var KNOWN_TX_SOURCES = ['PDF匯入', '文字匯入', '自動配對', 'App'];
+
+/**
+ * 稽核所有啟用帳戶的餘額組成：收支合計、來源分布、分類金額分布
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object[]} { name, type, initialBalance, initialDate, txCount, income, expense, currentBalance, bySource, byCategory }
+ */
+function auditBalances(ss) {
+  ss = getSpreadsheet(ss);
+  var accounts = getAccounts(ss);
+  var rows = getTransactionRows(ss);
+  return accounts.map(function(account) {
+    var income = 0;
+    var expense = 0;
+    var txCount = 0;
+    var bySource = {};
+    var byCategory = {};
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (!shouldIncludeTransaction(account, row)) { continue; }
+      var tx = rowToTransaction(row, i + 2);
+      txCount++;
+      if (tx.type === '收入') { income += tx.amount; }
+      else if (tx.type === '支出') { expense += tx.amount; }
+      var sourceKey = KNOWN_TX_SOURCES.indexOf(tx.source) >= 0 ? tx.source : '手動';
+      bySource[sourceKey] = (bySource[sourceKey] || 0) + 1;
+      var catKey = tx.category || '(無分類)';
+      byCategory[catKey] = (byCategory[catKey] || 0) + tx.amount;
+    }
+    return {
+      name: account.name,
+      type: account.type || '銀行',
+      initialBalance: account.initialBalance,
+      initialDate: account.initialDate,
+      txCount: txCount,
+      income: income,
+      expense: expense,
+      currentBalance: account.initialBalance + income - expense,
+      bySource: bySource,
+      byCategory: byCategory
+    };
+  });
+}
+
+/**
+ * 除錯用：在 GAS 編輯器手動執行，Logger 會列出全帳戶的餘額組成總覽
+ * @returns {Object[]} auditBalances() 的結果
+ */
+function printBalanceAudit() {
+  var ss = getSpreadsheet();
+  var audits = auditBalances(ss);
+  audits.forEach(function(a) {
+    var sourceParts = KNOWN_TX_SOURCES.concat(['手動']).map(function(k) {
+      return k + ':' + (a.bySource[k] || 0);
+    });
+    var topCategories = Object.keys(a.byCategory)
+      .sort(function(x, y) { return a.byCategory[y] - a.byCategory[x]; })
+      .slice(0, 3)
+      .map(function(k) { return k + ':' + a.byCategory[k]; });
+    Logger.log(a.name + ' | ' + a.type + ' | 初始 ' + a.initialBalance + ' (' + (a.initialDate || '無') + ') | 筆數 ' + a.txCount +
+      ' | 收入 ' + a.income + ' | 支出 ' + a.expense + ' | 餘額 ' + a.currentBalance +
+      ' | 來源 {' + sourceParts.join(', ') + '} | 最大分類 {' + topCategories.join(', ') + '}');
+  });
+  return audits;
 }

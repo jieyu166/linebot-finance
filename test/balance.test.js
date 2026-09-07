@@ -150,5 +150,91 @@ t('buildAllBalancesReply：無信用卡帳戶時省略該分區標題', () => {
   assert.strictEqual(reply, expected);
 });
 
+// ===== listAccountTransactions / auditBalances：帳戶管理 + 交易紀錄雙工作表假物件 =====
+
+function accountsSheet(rows) {
+  const data = [['帳戶名稱','金融機構','幣別','初始餘額','初始日期','備註','是否啟用','帳戶類型','扣款帳戶','帳號識別']].concat(rows);
+  return {
+    _data: data, getLastRow: () => data.length,
+    getRange: (r, c, nr, nc) => ({
+      getValues: () => data.slice(r - 1, r - 1 + nr).map(row => { const o = []; for (let i = 0; i < nc; i++) o.push(row[c - 1 + i] === undefined ? '' : row[c - 1 + i]); return o; })
+    })
+  };
+}
+function txSheet(rows) {
+  const data = [['日期','金融機構','帳戶名稱','類型','分類','品項','明細描述','幣別','金額','來源','ID','轉帳ID']].concat(rows);
+  return {
+    _data: data, getLastRow: () => data.length,
+    getRange: (r, c, nr, nc) => ({
+      getValues: () => data.slice(r - 1, r - 1 + nr).map(row => { const o = []; for (let i = 0; i < nc; i++) o.push(row[c - 1 + i] === undefined ? '' : row[c - 1 + i]); return o; })
+    })
+  };
+}
+// 交易列 A-L：日期, 機構, 帳戶, 類型, 分類, 品項, 明細, 幣別, 金額, 來源, ID, 轉帳ID
+function txRow(date, inst, account, type, cat, item, amount, source, transferId) {
+  return [date, inst, account, type, cat, item || '', '', 'TWD', amount, source || '', '', transferId || ''];
+}
+function twoSheetSs(accounts, transactions) {
+  const sheets = { '帳戶管理': accountsSheet(accounts), '交易紀錄': txSheet(transactions) };
+  return { getSheetByName: (n) => sheets[n] };
+}
+
+t('listAccountTransactions：只回傳 shouldIncludeTransaction 納入的列，依日期排序', () => {
+  const ss = twoSheetSs(
+    [['永豐大戶','永豐銀行','TWD',200000,'2026/01/01','',true,'銀行','','']],
+    [
+      txRow('2026/03/05', '永豐銀行', '永豐大戶', '支出', '飲食', '晚餐', 3000, 'App', ''),
+      txRow('2026/01/15', '永豐銀行', '永豐大戶', '支出', '飲食', '午餐', 500, 'PDF匯入', ''),
+      txRow('2026/01/01', '永豐銀行', '永豐大戶', '支出', '飲食', '排除：初始日當天', 100, 'App', ''), // 初始日當天，應排除
+      txRow('2026/02/10', '永豐銀行', '永豐大戶', '收入', '利息', '', 2000, '自動配對', 'tf-12345678'),
+      txRow('2026/01/20', '國泰銀行', '國泰', '支出', '購物', '不屬於此帳戶', 999, 'App', ''), // 不同帳戶，應排除
+    ]
+  );
+  const list = gs.listAccountTransactions('永豐大戶', ss);
+  assert.strictEqual(list.length, 3);
+  assert.deepStrictEqual(list.map(t => t.date), ['2026/01/15', '2026/02/10', '2026/03/05']);
+  assert.strictEqual(list[0].rowIndex, 3); // 第 3 列 = 1/15 那筆（第 2 列是 3/5）
+  assert.strictEqual(list[1].transferId, 'tf-12345678');
+  assert.strictEqual(list[1].category, '利息');
+  assert.strictEqual(list[2].item, '晚餐');
+});
+
+t('listAccountTransactions：找不到帳戶回傳空陣列', () => {
+  const ss = twoSheetSs([['永豐大戶','永豐銀行','TWD',0,'','',true,'銀行','','']], []);
+  assert.deepStrictEqual(gs.listAccountTransactions('不存在的帳戶', ss), []);
+});
+
+t('auditBalances：各帳戶收支合計、來源分布、分類金額分布', () => {
+  const ss = twoSheetSs(
+    [
+      ['永豐大戶','永豐銀行','TWD',200000,'2026/01/01','',true,'銀行','',''],
+      ['永豐信用卡','永豐銀行','TWD',-5000,'','',true,'信用卡','永豐大戶','']
+    ],
+    [
+      txRow('2026/01/15', '永豐銀行', '永豐大戶', '支出', '飲食', '午餐', 500, 'PDF匯入', ''),
+      txRow('2026/02/10', '永豐銀行', '永豐大戶', '收入', '利息', '', 2000, '自動配對', ''),
+      txRow('2026/03/01', '永豐銀行', '永豐大戶', '支出', '飲食', '晚餐', 300, '', ''), // 來源空白 → 手動
+      txRow('2026/01/05', '永豐銀行', '永豐信用卡', '支出', '購物', 'A', 1000, 'App', ''),
+      txRow('2026/01/06', '永豐銀行', '永豐信用卡', '支出', '購物', 'B', 500, 'App', ''),
+    ]
+  );
+  const audits = gs.auditBalances(ss);
+  const dahu = audits.find(a => a.name === '永豐大戶');
+  assert.strictEqual(dahu.txCount, 3);
+  assert.strictEqual(dahu.income, 2000);
+  assert.strictEqual(dahu.expense, 800);
+  assert.strictEqual(dahu.currentBalance, 200000 + 2000 - 800);
+  assert.strictEqual(dahu.bySource['PDF匯入'], 1);
+  assert.strictEqual(dahu.bySource['自動配對'], 1);
+  assert.strictEqual(dahu.bySource['手動'], 1);
+  assert.strictEqual(dahu.byCategory['飲食'], 800);
+
+  const card = audits.find(a => a.name === '永豐信用卡');
+  assert.strictEqual(card.txCount, 2);
+  assert.strictEqual(card.expense, 1500);
+  assert.strictEqual(card.bySource['App'], 2);
+  assert.strictEqual(card.byCategory['購物'], 1500);
+});
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);
