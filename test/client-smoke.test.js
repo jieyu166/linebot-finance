@@ -48,6 +48,20 @@ t('App.html 含新增／編輯頁必要字串：openEditor、closeEditor、四�
   });
 });
 
+t('App.html 含預算分頁必要字串：renderBudget、budget API、新增/編輯 action、budgetColor', () => {
+  var body = extractScriptBody(readSrc('App.html'));
+  [
+    'renderBudget',
+    'apiBudgetUsage',
+    'apiSaveBudget',
+    'budget-add',
+    'budget-edit',
+    'CL.budgetColor'
+  ].forEach(function (needle) {
+    assert.ok(body.indexOf(needle) !== -1, '缺少字串: ' + needle);
+  });
+});
+
 t('Index.html 包含三個 include 與 #app', () => {
   var html = readSrc('Index.html');
   assert.ok(html.indexOf("include('Styles')") !== -1, '缺少 include(\'Styles\')');

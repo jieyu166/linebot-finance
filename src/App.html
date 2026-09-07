@@ -9,6 +9,9 @@
     transactions: [],
     stats: null,
     budgets: [],
+    budgetsYearMonth: null,
+    budgetsPending: false,
+    budgetSheet: null,
     balances: [],
     editing: null,
     filterCategory: ''
@@ -63,6 +66,12 @@
   function setTab(tab) {
     state.tab = tab;
     render();
+    if (tab === 'budget' && state.budgetsYearMonth !== state.yearMonth) {
+      loadBudgets().then(render).catch(function (err) {
+        toast((err && err.message) || String(err), true);
+        render();
+      });
+    }
   }
 
   /* ---------------- 新增／編輯頁（Task 6） ---------------- */
@@ -509,6 +518,112 @@
     });
   }
 
+  function loadBudgets() {
+    state.budgetsPending = true;
+    return api('apiBudgetUsage', state.yearMonth).then(function (list) {
+      state.budgets = list || [];
+      state.budgetsYearMonth = state.yearMonth;
+      state.budgetsPending = false;
+    }, function (err) {
+      state.budgetsPending = false;
+      throw err;
+    });
+  }
+
+  /* ---------------- 預算分頁（Task 7） ---------------- */
+
+  function budgetSaveFlow(kind, name, currentAmount) {
+    var raw = prompt('「' + name + '」月預算金額（0 = 刪除）', String(currentAmount || 0));
+    if (raw === null) { return; }
+    var amount = CL.parseAmountInput(raw);
+    if (isNaN(amount)) {
+      toast('金額不正確', true);
+      return;
+    }
+    api('apiSaveBudget', { kind: kind, name: name, amount: amount }).then(function (result) {
+      state.budgetSheet = null;
+      return loadBudgets().then(function () {
+        render();
+        toast((result && result.deleted) ? '已刪除' : '已儲存');
+      });
+    }).catch(function (err) {
+      toast((err && err.message) || String(err), true);
+    });
+  }
+
+  function budgetRowIconColor(b) {
+    if (b.kind === '帳戶') {
+      return { icon: '🏦', color: '#78909C' };
+    }
+    var bs = state.bootstrap;
+    var list = (bs && bs.expenseCategories) || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].name === b.name) {
+        return { icon: list[i].icon || String(b.name).charAt(0), color: list[i].color || CL.defaultColor(i) };
+      }
+    }
+    return { icon: b.name ? String(b.name).charAt(0) : '?', color: CL.defaultColor(0) };
+  }
+
+  function renderBudgetRow(b) {
+    var ic = budgetRowIconColor(b);
+    var ratio = Number(b.ratio) || 0;
+    var pct = Math.min(Math.max(ratio, 0), 1) * 100;
+    var remaining = Number(b.remaining) || 0;
+    var remainingText = remaining < 0
+      ? '超支 ' + esc(CL.formatMoney(Math.abs(remaining), 'TWD'))
+      : esc(CL.formatMoney(remaining, 'TWD'));
+    var html = '<div class="budget-row" data-action="budget-edit" data-kind="' + esc(b.kind) +
+      '" data-name="' + esc(b.name) + '" data-budget="' + esc(b.budget) + '">';
+    html += '<div class="budget-row-top">' +
+      '<span class="budget-icon" style="background:' + esc(ic.color) + '">' + esc(ic.icon) + '</span>' +
+      '<span class="budget-name">' + esc(b.name) + '</span>' +
+      '</div>';
+    html += '<div class="bar"><i style="width:' + pct + '%;background:' + esc(CL.budgetColor(b.level)) + '"></i></div>';
+    html += '<div class="budget-text">已用 ' + esc(CL.formatMoney(b.used, 'TWD')) + ' / ' +
+      esc(CL.formatMoney(b.budget, 'TWD')) + '，剩 ' + remainingText + '</div>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderBudgetSheet() {
+    var sheet = state.budgetSheet;
+    if (!sheet) { return ''; }
+    var html = '<div class="sheet-backdrop" data-action="sheet-close"><div class="sheet" data-action="sheet-noop">';
+    html += '<div class="sheet-header"><span>新增預算</span>' +
+      '<button class="sheet-close" data-action="sheet-close">✕</button></div>';
+    if (sheet.step === 'kind') {
+      html += '<div class="list">' +
+        '<button data-action="budget-kind" data-kind="分類">分類</button>' +
+        '<button data-action="budget-kind" data-kind="帳戶">帳戶</button>' +
+        '</div>';
+    } else if (sheet.step === 'pick') {
+      var already = {};
+      (state.budgets || []).forEach(function (b) { already[b.kind + '|' + b.name] = true; });
+      var items = [];
+      if (sheet.kind === '分類') {
+        var cats = (state.bootstrap && state.bootstrap.expenseCategories) || [];
+        items = cats.filter(function (c) { return !already['分類|' + c.name]; });
+      } else {
+        var accs = (state.bootstrap && state.bootstrap.accounts) || [];
+        items = accs.filter(function (a) { return !already['帳戶|' + a.name]; });
+      }
+      if (items.length === 0) {
+        html += '<div class="empty">全部已設定預算</div>';
+      } else {
+        html += '<div class="list">';
+        items.forEach(function (it) {
+          var icon = sheet.kind === '分類' ? (it.icon || String(it.name).charAt(0)) : '🏦';
+          html += '<button data-action="budget-pick" data-name="' + esc(it.name) + '">' +
+            esc(icon) + ' ' + esc(it.name) + '</button>';
+        });
+        html += '</div>';
+      }
+    }
+    html += '</div></div>';
+    return html;
+  }
+
   function init() {
     api('apiBootstrap').then(function (bootstrap) {
       state.bootstrap = bootstrap;
@@ -573,11 +688,7 @@
     }
 
     var html = '';
-    html += '<div class="month-nav">' +
-      '<button data-action="month-prev">‹</button>' +
-      '<span class="month-label">' + esc(CL.inferYearMonthLabel(state.yearMonth)) + '</span>' +
-      '<button data-action="month-next">›</button>' +
-      '</div>';
+    html += renderMonthNav();
 
     if (state.filterCategory) {
       html += '<div class="filter-bar"><span class="chip">' + esc(state.filterCategory) +
@@ -641,8 +752,38 @@
       '</div>';
   }
 
+  function renderMonthNav() {
+    return '<div class="month-nav">' +
+      '<button data-action="month-prev">‹</button>' +
+      '<span class="month-label">' + esc(CL.inferYearMonthLabel(state.yearMonth)) + '</span>' +
+      '<button data-action="month-next">›</button>' +
+      '</div>';
+  }
+
   function renderBudget() {
-    return '<div class="empty">（下一版）</div>';
+    if (!state.bootstrap) {
+      return '<div class="loading">載入中…</div>';
+    }
+
+    var html = '';
+    html += renderMonthNav();
+    html += '<div class="budget-header"><button class="btn-add-budget" data-action="budget-add">＋ 新增預算</button></div>';
+
+    if (state.budgetsYearMonth !== state.yearMonth) {
+      html += '<div class="loading">載入中…</div>';
+    } else {
+      var list = state.budgets || [];
+      if (list.length === 0) {
+        html += '<div class="empty">尚未設定預算</div>';
+      } else {
+        html += '<div class="budget-list">';
+        list.forEach(function (b) { html += renderBudgetRow(b); });
+        html += '</div>';
+      }
+    }
+
+    html += renderBudgetSheet();
+    return html;
   }
 
   function renderStats() {
@@ -661,16 +802,19 @@
     var action = el.getAttribute('data-action');
     if (action === 'tab') {
       setTab(el.getAttribute('data-tab'));
-    } else if (action === 'month-prev') {
-      state.yearMonth = CL.yearMonthShift(state.yearMonth, -1);
+    } else if (action === 'month-prev' || action === 'month-next') {
+      state.yearMonth = CL.yearMonthShift(state.yearMonth, action === 'month-prev' ? -1 : 1);
       state.filterCategory = '';
       render();
-      loadMonth().then(render).catch(function (err) { toast((err && err.message) || String(err), true); });
-    } else if (action === 'month-next') {
-      state.yearMonth = CL.yearMonthShift(state.yearMonth, 1);
-      state.filterCategory = '';
-      render();
-      loadMonth().then(render).catch(function (err) { toast((err && err.message) || String(err), true); });
+      var tasks = [loadMonth()];
+      if (state.tab === 'budget') {
+        state.budgetsYearMonth = null;
+        tasks.push(loadBudgets());
+      }
+      Promise.all(tasks).then(render).catch(function (err) {
+        toast((err && err.message) || String(err), true);
+        render();
+      });
     } else if (action === 'clear-filter') {
       state.filterCategory = '';
       render();
@@ -680,6 +824,26 @@
       openEditor(tx);
     } else if (action === 'fab') {
       openEditor(null);
+    } else if (action === 'budget-add') {
+      state.budgetSheet = { step: 'kind' };
+      render();
+    } else if (action === 'budget-kind') {
+      state.budgetSheet = { step: 'pick', kind: el.getAttribute('data-kind') };
+      render();
+    } else if (action === 'sheet-close') {
+      state.budgetSheet = null;
+      render();
+    } else if (action === 'sheet-noop') {
+      // 無動作：阻止點擊 sheet 內部空白處時被外層 backdrop 關閉
+    } else if (action === 'budget-pick') {
+      var pickKind = state.budgetSheet && state.budgetSheet.kind;
+      var pickName = el.getAttribute('data-name');
+      budgetSaveFlow(pickKind, pickName, 0);
+    } else if (action === 'budget-edit') {
+      var editKind = el.getAttribute('data-kind');
+      var editName = el.getAttribute('data-name');
+      var editBudget = Number(el.getAttribute('data-budget')) || 0;
+      budgetSaveFlow(editKind, editName, editBudget);
     }
   }
 
@@ -699,6 +863,8 @@
     loadMonth: loadMonth,
     init: init,
     renderRecords: renderRecords,
+    renderBudget: renderBudget,
+    loadBudgets: loadBudgets,
     openEditor: openEditor,
     closeEditor: closeEditor
   };

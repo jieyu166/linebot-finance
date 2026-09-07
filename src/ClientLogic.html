@@ -17,6 +17,17 @@
     return '';
   }
 
+  // 解析使用者輸入的金額字串（允許千分位逗號），無法解析回傳 NaN。
+  function parseAmountInput(raw) {
+    if (raw == null) return NaN;
+    var s = String(raw).trim().replace(/,/g, '');
+    if (s === '') return NaN;
+    if (!/^-?\d+(\.\d+)?$/.test(s)) return NaN;
+    var n = Number(s);
+    if (Number.isNaN(n)) return NaN;
+    return n;
+  }
+
   // 將 expr 拆成 tokens：數字（含小數點）與運算子 + - × ÷ * /
   // 無法辨識的字元、空 token、連續運算子、開頭/結尾為運算子都視為不合法。
   function tokenize(expr) {
@@ -234,6 +245,7 @@
     formatMoney: formatMoney,
     pieSlices: pieSlices,
     budgetColor: budgetColor,
+    parseAmountInput: parseAmountInput,
     defaultColor: defaultColor,
     yearMonthShift: yearMonthShift,
     inferYearMonthLabel: inferYearMonthLabel,

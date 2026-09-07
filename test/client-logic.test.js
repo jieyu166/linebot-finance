@@ -99,6 +99,22 @@ t('budgetColor 三種等級', () => {
   assert.strictEqual(CL.budgetColor('over'), '#F44336');
 });
 
+t('parseAmountInput 允許千分位逗號', () => {
+  assert.strictEqual(CL.parseAmountInput('8,000'), 8000);
+  assert.strictEqual(CL.parseAmountInput('1,234.5'), 1234.5);
+});
+t('parseAmountInput 純數字與 0', () => {
+  assert.strictEqual(CL.parseAmountInput('0'), 0);
+  assert.strictEqual(CL.parseAmountInput('  500  '), 500);
+});
+t('parseAmountInput 無法解析回傳 NaN', () => {
+  assert.ok(Number.isNaN(CL.parseAmountInput('abc')));
+  assert.ok(Number.isNaN(CL.parseAmountInput('')));
+  assert.ok(Number.isNaN(CL.parseAmountInput(null)));
+  assert.ok(Number.isNaN(CL.parseAmountInput('1.2.3')));
+  assert.ok(Number.isNaN(CL.parseAmountInput('12abc')));
+});
+
 t('defaultColor 8 色循環', () => {
   assert.strictEqual(CL.defaultColor(0), '#3F7CFF');
   assert.strictEqual(CL.defaultColor(7), '#6D4C41');
