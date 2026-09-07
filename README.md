@@ -181,7 +181,7 @@ openspec/
 1. 貼上最新 src/*.gs（含新檔 TransferService.gs，共 7 個檔案）
 2. 執行 initializeSheets()（補標題、預算表、收入分類「轉帳」、缺少的帳戶；若已執行過 runMigrations() 且結果不對，先執行 undoMigrations() 還原）
 3. 執行 backfillTransactionIds()
-4. 在「帳戶管理」填帳戶類型、扣款帳戶、帳號識別、初始餘額（信用卡填上期未繳金額的負數，初始日期填該期結帳日；初始餘額若留空，之後看到的資產帳戶餘額變成負數，通常就是這裡沒填）
+4. 編輯 Config.gs 的 INITIAL_BALANCES（銀行填 8/31 實際餘額；信用卡填最近一期本期應繳的負數與該期結帳日），執行 previewInitialBalances() 確認，再執行 applyInitialBalances()
 5. 執行 previewMigrations() 看 Logger 預覽（搬移對照表在 Config.gs 的 MIGRATIONS）。migrateCreditCardRows() 預設會自動排除「繳信用卡／轉帳／利息／回饋／薪資／股利／貸款／投資／投資獲利／兼職／獎金／家人給」分類，以及品項/描述含「連結帳戶、利息、回饋、轉帳、換匯、卡費、還本、存入、薪資、股息、ACH、定期買股、交割、提款、現金提」的列，這些列會在 Logger 印出 `[排除]` 且不會被搬移；只有真正的信用卡消費商戶列才會搬移，因此永豐大戶→永豐信用卡不再需要限制日期區間也是安全的。確認 Logger 預覽結果無誤後執行 runMigrations()。搬移結果不對時可執行 undoMigrations()（或先 previewUndoMigrations() 預覽）把信用卡帳戶上的消費列搬回原扣款帳戶。
 6. 執行 previewCreditCardPairing() 預覽，再執行 runCreditCardPairing() 補配對。
 7. 在 LINE 傳「餘額」核對

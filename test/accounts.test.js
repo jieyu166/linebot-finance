@@ -17,6 +17,7 @@ function accountSheet(rows) {
       return {
         getValues: () => data.slice(a - 1, a - 1 + nr).map(row => { const o = []; for (let i = 0; i < nc; i++) o.push(row[c - 1 + i] === undefined ? '' : row[c - 1 + i]); return o; }),
         setValues: (vals) => { for (let i = 0; i < vals.length; i++) { const row = data[a - 1 + i] || (data[a - 1 + i] = []); for (let j = 0; j < vals[i].length; j++) row[c - 1 + j] = vals[i][j]; } },
+        setValue: (v) => { const row = data[a - 1] || (data[a - 1] = []); row[c - 1] = v; },
         setNumberFormat: (fmt) => { numberFormatCalls.push({ row: a, col: c, numRows: nr, numCols: nc, fmt: fmt }); }
       };
     }
@@ -94,5 +95,36 @@ t('upsertDefaultAccounts 對帳戶管理 J 欄整欄套用純文字格式', () =
   const jCalls = sheet._numberFormatCalls.filter(c => c.col === 10 && c.fmt === '@');
   assert.ok(jCalls.length >= 1, 'setNumberFormat("@") 應被呼叫在第 10 欄（J）');
 });
+const OVERRIDE_LIST = [
+  { name: '玉山', balance: 0, date: '2026/08/31' },
+  { name: '台新', balance: 0, date: '2026/08/31' },
+  { name: '不存在的帳戶', balance: 100, date: '2026/08/31' }
+];
+
+function balancesFixtureSheet() {
+  return accountSheet([
+    ['玉山', '玉山銀行', 'TWD', 1000, '2026/01/01', '', true, '銀行', '', ''],
+    ['台新', '台新銀行', 'TWD', 2000, '2026/01/01', '', true, '銀行', '', '']
+  ]);
+}
+
+t('previewInitialBalances 不改資料，回傳 skipped 數', () => {
+  const sheet = balancesFixtureSheet();
+  const result = gs.previewInitialBalances(OVERRIDE_LIST, ss(sheet));
+  assert.strictEqual(sheet._data[1][3], 1000);
+  assert.strictEqual(sheet._data[2][3], 2000);
+  assert.deepStrictEqual(result, { applied: 0, skipped: 1 });
+});
+
+t('applyInitialBalances 寫入 D/E 欄，略過未知帳戶，回傳 applied/skipped', () => {
+  const sheet = balancesFixtureSheet();
+  const result = gs.applyInitialBalances(OVERRIDE_LIST, ss(sheet));
+  assert.strictEqual(sheet._data[1][3], 0);
+  assert.strictEqual(sheet._data[1][4], '2026/08/31');
+  assert.strictEqual(sheet._data[2][3], 0);
+  assert.strictEqual(sheet._data[2][4], '2026/08/31');
+  assert.deepStrictEqual(result, { applied: 2, skipped: 1 });
+});
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);
