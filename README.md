@@ -173,6 +173,8 @@ openspec/
 
 App 與 LINE Webhook 是**同一份程式碼的兩個部署**：
 
+> ⚠️ **事前準備**：部署前確認 4 個 HTML 檔案（Index、Styles、ClientLogic、App）已在 Apps Script 編輯器建立，否則部署後開啟 `?ui=1` 會出錯。
+
 1. 在 Apps Script 編輯器右上角「部署 → 新增部署作業」，類型選「網頁應用程式」。
 2. 執行身分選「我」，存取權選「只有我自己」（與 LINE 部署的「所有人」不同，App 部署不對外開放）。
 3. 部署後取得該部署的網址，在網址結尾加上 `?ui=1`（例如 `https://script.google.com/macros/s/.../exec?ui=1`），才會進入 App 主頁；不加 `ui=1` 會回傳 `OK`（維持 LINE 部署驗證用的行為）。
@@ -230,7 +232,7 @@ LINE 部署與 App 部署共用同一份試算表，資料即時互通；LINE �
 2. 建立 LINE Official Account + Messaging API Channel
 3. 取得 OpenAI API Key
 4. 從試算表「擴充功能 → Apps Script」開啟編輯器
-5. 建立 7 個 .gs 檔案（含 `TransferService.gs`），貼入 `src/` 下的程式碼
+5. 建立 9 個 .gs 檔案（Config、Main、LineService、OpenAIService、SheetService、PdfService、TransferService、WebApp、WebAppLogic）與 4 個 HTML 檔案（Index、Styles、ClientLogic、App），貼入 `src/` 下的程式碼。HTML 檔在 Apps Script 編輯器用「新增 → HTML」建立，檔名不含副檔名。
 6. 啟用 Drive API 進階服務
 7. 設定 Script Properties（OPENAI_API_KEY、LINE_CHANNEL_SECRET、LINE_CHANNEL_ACCESS_TOKEN、SHEET_ID；可選填 OPENAI_MODEL 覆寫預設的 gpt-4.1-mini）
 8. 執行 `initializeSheets()` 建立工作表結構（已存在的工作表不會被覆蓋）
@@ -243,7 +245,7 @@ LINE 部署與 App 部署共用同一份試算表，資料即時互通；LINE �
 已在使用舊版（7 欄帳戶管理、無轉帳配對）的使用者，依序執行：
 
 ```
-1. 貼上最新 src/*.gs（含新檔 TransferService.gs，共 7 個檔案）
+1. 貼上最新 src/ 全部檔案：9 個 .gs（新增 WebApp.gs、WebAppLogic.gs）與 4 個 HTML（Index、Styles、ClientLogic、App，用「新增 → HTML」建立）
 2. 執行 initializeSheets()（補標題、預算表、收入分類「轉帳」、缺少的帳戶；若已執行過 runMigrations() 且結果不對，先執行 undoMigrations() 還原）
 3. 執行 backfillTransactionIds()
 4. 在「帳戶管理」填帳戶類型、扣款帳戶、帳號識別、初始餘額（信用卡填上期未繳金額的負數，初始日期填該期結帳日；初始餘額若留空，之後看到的資產帳戶餘額變成負數，通常就是這裡沒填）
