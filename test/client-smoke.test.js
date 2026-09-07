@@ -102,4 +102,13 @@ t('App.html 含帳戶分頁必要字串：renderAccounts、帳戶/分類/轉帳 
   });
 });
 
+t('App.html doCatSave 改分類後會 loadMonth() 再 render()，確保紀錄頁分類名同步更新', () => {
+  var body = extractScriptBody(readSrc('App.html'));
+  var start = body.indexOf('function doCatSave');
+  assert.ok(start !== -1, '找不到 doCatSave');
+  var end = body.indexOf('\n  function ', start + 1);
+  var fnBody = end === -1 ? body.slice(start) : body.slice(start, end);
+  assert.ok(fnBody.indexOf('loadMonth') !== -1, 'doCatSave 應呼叫 loadMonth()');
+});
+
 process.exit(failed ? 1 : 0);
