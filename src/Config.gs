@@ -399,7 +399,7 @@ function runDeleteImportedRows(ss) {
 
 // ===== 一鍵套用初始餘額：改好數字後執行 previewInitialBalances() 再 applyInitialBalances() =====
 var INITIAL_BALANCES = [
-  // 銀行／現金：8/31 實際餘額
+  // 銀行／現金：填「初始日期」當天的實際餘額（此檔在公開 repo，請勿把真實數字提交）
   { name: '現金',       balance: 0,        date: '2026/08/31' },   // 請填實際現金
   { name: '一銀',       balance: 0,   date: '2026/08/31' },
   { name: 'LineBank',   balance: 0,    date: '2026/08/31' },
@@ -414,10 +414,10 @@ var INITIAL_BALANCES = [
   { name: '國泰',       balance: 0,        date: '2026/08/31' },   // 追蹤表為 -0，請確認是否為信用卡未繳
   { name: '樂天',       balance: 0,    date: '2026/08/31' },
   // 信用卡：最近一期「本期應繳總額」的負數，日期填該期結帳日
-  { name: '永豐信用卡',     balance: -0,  date: '2026/08/16' },
-  { name: '永豐信用卡外幣', balance: -0, date: '2026/08/16' },
-  { name: '一銀信用卡',     balance: -0,   date: '2026/08/05' },
-  { name: '玉山信用卡',     balance: -0,  date: '2026/08/13' },
+  { name: '永豐信用卡',     balance: 0,  date: '2026/08/31' },
+  { name: '永豐信用卡外幣', balance: 0, date: '2026/08/31' },
+  { name: '一銀信用卡',     balance: 0,   date: '2026/08/31' },
+  { name: '玉山信用卡',     balance: 0,  date: '2026/08/31' },
   { name: '台新信用卡',     balance: 0,       date: '2026/08/31' },   // 請依最近帳單填
   { name: '中信信用卡',     balance: 0,       date: '2026/08/31' },
   { name: '富邦信用卡',     balance: 0,       date: '2026/08/31' },

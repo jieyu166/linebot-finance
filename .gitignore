@@ -9,3 +9,4 @@ openspec/.vector-search.db*
 *.log
 test/fixtures/
 .superpowers/
+local/
