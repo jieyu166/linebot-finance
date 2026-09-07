@@ -409,6 +409,169 @@ function debugAccountBalance(accountName) {
 }
 
 /**
+ * 讀取分類清單（含圖示、顏色、列號）
+ * @param {string} sheetName - 工作表名稱（'支出分類' 或 '收入分類'）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object[]} { name, icon, color, rowIndex }
+ */
+function getCategoryRows(sheetName, ss) {
+  var sheet = getSpreadsheet(ss).getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) { return []; }
+  var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  var out = [];
+  values.forEach(function(row, i) {
+    var name = String(row[0] || '').trim();
+    if (name === '') { return; }
+    out.push({ name: name, icon: String(row[1] || '').trim(), color: String(row[2] || '').trim(), rowIndex: i + 2 });
+  });
+  return out;
+}
+
+/**
+ * 新增或更新分類（可更名）
+ * @param {string} sheetName - 工作表名稱（'支出分類' 或 '收入分類'）
+ * @param {Object} params - { name, icon, color, oldName }
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { rowIndex, renamed }
+ */
+function upsertCategory(sheetName, params, ss) {
+  ss = getSpreadsheet(ss);
+  var sheet = ss.getSheetByName(sheetName);
+  var rows = getCategoryRows(sheetName, ss);
+  var name = String(params.name || '').trim();
+  var oldName = String(params.oldName || '').trim();
+  if (name === '') { throw new Error('分類名稱不可空白'); }
+  var target = null;
+  rows.forEach(function(r) {
+    if (normalizeName(r.name) === normalizeName(oldName || name)) { target = r; }
+  });
+  var renamed = oldName !== '' && normalizeName(oldName) !== normalizeName(name);
+  if (renamed || !target) {
+    var dup = rows.some(function(r) { return normalizeName(r.name) === normalizeName(name) && (!target || r.rowIndex !== target.rowIndex); });
+    if (dup) { throw new Error('分類「' + name + '」已存在'); }
+  }
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    var rowIndex = target ? target.rowIndex : sheet.getLastRow() + 1;
+    sheet.getRange(rowIndex, 1, 1, 3).setValues([[name, params.icon || '', params.color || '']]);
+    return { rowIndex: rowIndex, renamed: renamed };
+  } finally { lock.releaseLock(); }
+}
+
+/**
+ * 讀取預算清單
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object[]} { kind, name, budget, rowIndex }
+ */
+function getBudgets(ss) {
+  var sheet = getSpreadsheet(ss).getSheetByName('預算');
+  if (!sheet || sheet.getLastRow() < 2) { return []; }
+  var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  var out = [];
+  values.forEach(function(row, i) {
+    var name = String(row[1] || '').trim();
+    if (name === '') { return; }
+    out.push({ kind: String(row[0] || '').trim(), name: name, budget: Math.abs(parseAmount(row[2])), rowIndex: i + 2 });
+  });
+  return out;
+}
+
+/**
+ * 新增、更新或刪除預算（金額 ≤ 0 或空時刪除）
+ * @param {Object} params - { kind, name, amount }
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { rowIndex, deleted }
+ */
+function upsertBudget(params, ss) {
+  ss = getSpreadsheet(ss);
+  var sheet = ss.getSheetByName('預算');
+  var amount = Math.abs(parseAmount(params.amount));
+  var existing = null;
+  getBudgets(ss).forEach(function(b) {
+    if (b.kind === params.kind && normalizeName(b.name) === normalizeName(params.name)) { existing = b; }
+  });
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    if (amount <= 0) {
+      if (existing) { sheet.deleteRow(existing.rowIndex); return { rowIndex: existing.rowIndex, deleted: true }; }
+      return { rowIndex: 0, deleted: true };
+    }
+    var rowIndex = existing ? existing.rowIndex : sheet.getLastRow() + 1;
+    sheet.getRange(rowIndex, 1, 1, 3).setValues([[params.kind, params.name, amount]]);
+    return { rowIndex: rowIndex, deleted: false };
+  } finally { lock.releaseLock(); }
+}
+
+/**
+ * 依 ID 更新一筆交易（只寫 A–I 欄，保留 J 原始訊息、K ID、L 轉帳ID）
+ * @param {Object} tx - 交易物件（需含 id；其餘欄位未提供則沿用原值）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} 更新後的交易物件
+ */
+function updateTransactionById(tx, ss) {
+  ss = getSpreadsheet(ss);
+  var found = findTransactionsByIds([tx.id], ss)[tx.id];
+  if (!found) { throw new Error('找不到這筆交易，可能已被刪除'); }
+  var merged = {};
+  for (var k in found) { merged[k] = found[k]; }
+  for (var j in tx) { if (tx[j] !== undefined) { merged[j] = tx[j]; } }
+  var row = transactionToRow(merged);
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    ss.getSheetByName('交易紀錄').getRange(found.rowIndex, 1, 1, 9).setValues([row.slice(0, 9)]);
+    return rowToTransaction(row.slice(0, 9).concat([found.source, found.id, found.transferId]), found.rowIndex);
+  } finally { lock.releaseLock(); }
+}
+
+/**
+ * 依 ID 刪除一筆交易；alsoLinked 時一併刪除配對的轉帳列，否則清空對方的 L 欄
+ * @param {string} id - 交易 ID
+ * @param {boolean} alsoLinked - 是否一併刪除配對的轉帳交易
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { deleted: number }
+ */
+function deleteTransactionById(id, alsoLinked, ss) {
+  ss = getSpreadsheet(ss);
+  var sheet = ss.getSheetByName('交易紀錄');
+  var all = getTransactionRows(ss).map(function(r, i) { return rowToTransaction(r, i + 2); });
+  var target = null;
+  all.forEach(function(t) { if (t.id === id) { target = t; } });
+  if (!target) { throw new Error('找不到這筆交易，可能已被刪除'); }
+  var toDelete = [target];
+  var linked = target.transferId ? all.filter(function(t) { return t.transferId === target.transferId && t.id !== id; }) : [];
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    if (alsoLinked) { toDelete = toDelete.concat(linked); }
+    else { linked.forEach(function(t) { sheet.getRange(t.rowIndex, 12, 1, 1).setValue(''); }); }
+    toDelete.sort(function(a, b) { return b.rowIndex - a.rowIndex; }).forEach(function(t) { sheet.deleteRow(t.rowIndex); });
+    return { deleted: toDelete.length };
+  } finally { lock.releaseLock(); }
+}
+
+/**
+ * 更新帳戶設定（初始餘額、初始日期、帳戶類型），只更新有提供的欄位
+ * @param {string} name - 帳戶名稱
+ * @param {Object} params - { initialBalance, initialDate, type }
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {number} 更新的列號
+ */
+function updateAccountSettings(name, params, ss) {
+  ss = getSpreadsheet(ss);
+  var sheet = ss.getSheetByName('帳戶管理');
+  var values = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues();
+  var rowIndex = 0;
+  values.forEach(function(row, i) { if (normalizeName(row[0]) === normalizeName(name)) { rowIndex = i + 2; } });
+  if (!rowIndex) { throw new Error('找不到帳戶「' + name + '」'); }
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    if (params.initialBalance !== undefined) { sheet.getRange(rowIndex, 4, 1, 1).setValue(parseAmount(params.initialBalance)); }
+    if (params.initialDate !== undefined) { sheet.getRange(rowIndex, 5, 1, 1).setValue(params.initialDate); }
+    if (params.type !== undefined && params.type !== '') { sheet.getRange(rowIndex, 8, 1, 1).setValue(params.type); }
+    return rowIndex;
+  } finally { lock.releaseLock(); }
+}
+
+/**
  * 寫入一筆交易紀錄
  * @param {string} date - 日期
  * @param {string} institution - 金融機構
