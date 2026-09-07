@@ -2,7 +2,7 @@ const assert = require('assert');
 const { loadGs } = require('./harness');
 const { fakeSheet, fakeSs } = require('./fakes');
 
-const gs = loadGs(['SheetService.gs', 'TransferService.gs']);
+const gs = loadGs(['SheetService.gs', 'TransferService.gs', 'Main.gs']);
 
 let failed = 0;
 function t(name, fn) {
@@ -579,6 +579,76 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     assert.ok(outOfRangeRow, '區間外的玉山列應保留');
   });
 }
+
+// ---- isBankStatement / countTransactionLikeLines ----
+// 注意：上方 gs3 區塊重新 loadGs(['SheetService.gs', 'TransferService.gs', 'Config.gs'])
+// 未含 Main.gs，會清掉 global 上的 isBankStatement / countTransactionLikeLines，
+// 所以這裡重新載入一次專用的 gs4。
+const gs4 = loadGs(['SheetService.gs', 'TransferService.gs', 'Main.gs']);
+
+const chinatrustSampleTab = [
+  '日期\t摘要\t支出\t存入\t結餘\t備註\t對方帳號\t註記',
+  '2026/06/10\t跨行轉\t50,000\t\t208,557\t行動網\t0010001800738826\t',
+  '2026/06/11\t跨行轉\t30,000\t\t178,557\t行動網\t0010001800738826\t',
+  '2026/06/12\t提款\t5,000\t\t173,557\t提款機\t\t',
+  '2026/06/13\t轉入\t\t20,000\t193,557\t薪轉\t\t',
+  '2026/06/14\t消費\t1,200\t\t192,357\t刷卡\t\t',
+  '2026/06/15\t跨行轉\t2,000\t\t190,357\t行動網\t0010001800738826\t',
+  '2026/06/16\t轉入\t\t15,000\t205,357\t薪轉\t\t',
+  '2026/06/17\t消費\t800\t\t204,557\t刷卡\t\t',
+  '2026/06/18\t跨行轉\t1,000\t\t203,557\t行動網\t0010001800738826\t',
+  '2026/06/19\t提款\t2,500\t\t201,057\t提款機\t\t'
+].join('\n');
+
+const chinatrustSampleSpace = chinatrustSampleTab.replace(/\t/g, '  ');
+
+const rocCardSample = [
+  '115/07/14\t網路非約轉帳\t24,000.00\t\t消費',
+  '115/07/15\t超商消費\t150.00\t\t消費',
+  '115/07/16\t信用卡繳款\t24,000.00\t\t轉帳'
+].join('\n');
+
+t('countTransactionLikeLines：中信帳單（tab 分隔）10 行交易列全部命中', () => {
+  assert.strictEqual(gs4.countTransactionLikeLines(chinatrustSampleTab), 10);
+});
+
+t('countTransactionLikeLines：非交易列（標題列、單行訊息）不計入', () => {
+  assert.strictEqual(gs4.countTransactionLikeLines('午餐80'), 0);
+  assert.strictEqual(gs4.countTransactionLikeLines('日期\t摘要\t支出\t存入\t結餘\t備註\t對方帳號\t註記'), 0);
+});
+
+t('isBankStatement：中信帳單貼進 LINE（tab 分隔）判定為帳單', () => {
+  assert.strictEqual(gs4.isBankStatement(chinatrustSampleTab), true);
+});
+
+t('isBankStatement：同一份中信帳單改用空白分隔仍判定為帳單', () => {
+  assert.strictEqual(gs4.isBankStatement(chinatrustSampleSpace), true);
+});
+
+t('isBankStatement：3 行民國年信用卡帳單判定為帳單', () => {
+  assert.strictEqual(gs4.isBankStatement(rocCardSample), true);
+});
+
+t('isBankStatement：單筆記帳「午餐80」不判定為帳單', () => {
+  assert.strictEqual(gs4.isBankStatement('午餐80'), false);
+});
+
+t('isBankStatement：單筆記帳「玉山信用卡 加油1500」不判定為帳單', () => {
+  assert.strictEqual(gs4.isBankStatement('玉山信用卡 加油1500'), false);
+});
+
+t('isBankStatement：查詢指令「餘額」不判定為帳單', () => {
+  assert.strictEqual(gs4.isBankStatement('餘額'), false);
+});
+
+t('isBankStatement：查詢指令「永豐大戶餘額」不判定為帳單', () => {
+  assert.strictEqual(gs4.isBankStatement('永豐大戶餘額'), false);
+});
+
+t('isBankStatement：兩行含「帳戶」字樣的閒聊訊息不判定為帳單', () => {
+  const chat = '我這個帳戶好像扣款了\n你知道為什麼嗎';
+  assert.strictEqual(gs4.isBankStatement(chat), false);
+});
 
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);

@@ -233,21 +233,53 @@ function handleFileMessage(event) {
 }
 
 /**
+ * 計算文字中「像交易明細列」的行數
+ * 一行要算「像交易明細列」須同時滿足：
+ *   1. 去除前導空白後開頭是日期（西元 yyyy/m/d、民國 yyy/m/d 或 mm/dd 後接空白或 tab）
+ *   2. 該行含至少一個「像金額」的片段（千分位逗號數字、兩位小數、或前後有空白的兩位以上數字）
+ * @param {string} text - 使用者輸入文字
+ * @returns {number}
+ */
+function countTransactionLikeLines(text) {
+  var dateStartPattern = /^(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}|\d{3}[\/\-]\d{1,2}[\/\-]\d{1,2}|\d{1,2}\/\d{1,2}(\s|\t))/;
+  var amountLikePattern = /\d{1,3}(,\d{3})+|\d+\.\d{2}|\s\d{2,}\s/;
+
+  var lines = String(text || '').split('\n');
+  var count = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].replace(/^\s+/, '');
+    if (dateStartPattern.test(line) && amountLikePattern.test(line)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
  * 偵測文字是否為銀行帳單明細
  * @param {string} text - 使用者輸入文字
  * @returns {boolean}
  */
 function isBankStatement(text) {
+  text = String(text || '');
+
   // 行數太少不可能是帳單
   var lines = text.split('\n');
   if (lines.length < 3) return false;
 
-  // 帳單關鍵字偵測
+  // 規則 1：像交易明細列的行數達門檻，直接視為帳單
+  if (countTransactionLikeLines(text) >= 3) {
+    return true;
+  }
+
+  // 規則 2：帳單關鍵字偵測
   var keywords = [
     '交易日期', '交易明細', '帳單', '帳戶', '帳號',
     '餘額', '明細', '入帳', '消費日', '摘要',
     '轉入', '轉出', '提出',
-    '成交日', '對帳單', '結帳日', '應繳'
+    '成交日', '對帳單', '結帳日', '應繳',
+    '結餘', '對方帳號', '跨行轉', '消費日', '入帳日',
+    '卡號', '本期應繳', '成交日期', '交易別'
   ];
 
   var matchCount = 0;
@@ -257,7 +289,10 @@ function isBankStatement(text) {
     }
   }
 
-  // 至少命中 3 個關鍵字且文字長度超過 100 才當帳單
+  // 行數 >= 3 且長度 > 60 時門檻降為 2；否則維持門檻 3 且長度 > 100
+  if (lines.length >= 3 && text.length > 60 && matchCount >= 2) {
+    return true;
+  }
   return matchCount >= 3 && text.length > 100;
 }
 
