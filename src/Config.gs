@@ -325,3 +325,26 @@ function runCreditCardPairing() {
   (result.details || []).forEach(function(d) { Logger.log(d); });
   return result;
 }
+
+/** 舊版匯入清理設定：previewDeleteImportedRows()／runDeleteImportedRows() 依此刪除指定帳戶、區間內的匯入錯誤列 */
+var REIMPORT_CLEANUP = { account: '玉山', start: '2026/07/01', end: '2026/07/31' };
+
+/**
+ * 預覽刪除 REIMPORT_CLEANUP 設定範圍內的匯入交易列（不刪除），可直接在編輯器點選執行
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Object} { matched, deleted, rows[] }
+ */
+function previewDeleteImportedRows(ss) {
+  return deleteImportedRows(REIMPORT_CLEANUP.account, REIMPORT_CLEANUP.start, REIMPORT_CLEANUP.end, true, ss);
+}
+
+/**
+ * 正式刪除 REIMPORT_CLEANUP 設定範圍內的匯入交易列，可直接在編輯器點選執行
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Object} { matched, deleted, rows[] }
+ */
+function runDeleteImportedRows(ss) {
+  var result = deleteImportedRows(REIMPORT_CLEANUP.account, REIMPORT_CLEANUP.start, REIMPORT_CLEANUP.end, false, ss);
+  Logger.log('已刪除 ' + result.deleted + ' 筆');
+  return result;
+}

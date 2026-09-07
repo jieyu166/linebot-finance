@@ -114,6 +114,8 @@ openspec/
 - 交易列對應帳戶的規則（依序）：C 欄 = 帳戶名稱；C 欄 = 金融機構名稱；C 欄空白且 B 欄 = 金融機構（舊資料）；C 欄與 B 欄皆空白視為現金。比對忽略空白與大小寫。
 - 金額欄可為數字或含千分位的字串（如 `1,234`），支出取絕對值。
 - 餘額算不對時，先在 Apps Script 編輯器執行 `printBalanceAudit()`，Logger 會列出全帳戶總覽（初始餘額、筆數、收支合計、餘額、來源分布、金額最大的分類）；要看單一帳戶逐筆明細再執行 `printAccountTransactions('帳戶名稱')`；還要看某筆交易被排除的原因，才用 `debugAccountBalance('帳戶名稱')`。
+  - 若是舊版匯入邏輯寫入了錯誤列，改 `Config.gs` 的 `REIMPORT_CLEANUP` 指定帳戶與區間，執行 `previewDeleteImportedRows()` 預覽、確認無誤後執行 `runDeleteImportedRows()` 刪掉這些匯入錯誤列，再重新貼帳單匯入。
+  - 信用卡帳戶也要填初始餘額（上期未繳的負數）與初始日期（該期結帳日），否則會把該卡的全部歷史交易都計入餘額。
 
 ### 預算
 
