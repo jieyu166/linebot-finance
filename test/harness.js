@@ -91,4 +91,16 @@ function loadGs(files, extraGlobals) {
   return result;
 }
 
-module.exports = { loadGs, Utilities };
+// 載入 src/<file>（HtmlService include），取出所有 <script>…</script> 內容，
+// 依序用 vm.runInThisContext 執行，讓 <script> 內對 window.CL 的賦值落在
+// global 上（global.window = global），回傳 global 供測試檔取用。
+function loadHtmlScript(file) {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
+  const scripts = [];
+  html.replace(/<script[^>]*>([\s\S]*?)<\/script>/g, (m, body) => { scripts.push(body); return m; });
+  global.window = global;
+  scripts.forEach((s, i) => vm.runInThisContext(s, { filename: file + '#' + i }));
+  return global;
+}
+
+module.exports = { loadGs, loadHtmlScript, Utilities };
