@@ -26,7 +26,7 @@ function hasFxHint(tx) { return /換匯/.test((tx.description || '') + (tx.item 
  * @param {Object} tx - 目標交易
  * @param {Object[]} allTx - 全部交易
  * @param {Object[]} accounts - 帳戶清單
- * @param {Object} [options] - { dayWindow, counterpartyAccount, counterpartyBank }
+ * @param {Object} [options] - { dayWindow, counterpartyAccount, counterpartyBank, anyCategory }
  * @returns {Object[]} 候選交易陣列
  */
 function pickTransferCandidates(tx, allTx, accounts, options) {
@@ -39,7 +39,7 @@ function pickTransferCandidates(tx, allTx, accounts, options) {
   var oppositeType = tx.type === '支出' ? '收入' : '支出';
   return allTx.filter(function(o) {
     if (o.id === tx.id || o.transferId || o.type !== oppositeType) { return false; }
-    if (o.category !== '轉帳' && o.category !== '') { return false; }
+    if (!options.anyCategory && o.category !== '轉帳' && o.category !== '') { return false; }
     if (normalizeName(o.account) === normalizeName(tx.account)) { return false; }
     var oa = findAccountByName(accounts, o.account);
     if (!oa) { return false; }
