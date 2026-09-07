@@ -18,11 +18,12 @@
   }
 
   // 解析使用者輸入的金額字串（允許千分位逗號），無法解析回傳 NaN。
+  // 負數拒絕（0 除外，0 代表刪除）。
   function parseAmountInput(raw) {
     if (raw == null) return NaN;
     var s = String(raw).trim().replace(/,/g, '');
     if (s === '') return NaN;
-    if (!/^-?\d+(\.\d+)?$/.test(s)) return NaN;
+    if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
     var n = Number(s);
     if (Number.isNaN(n)) return NaN;
     return n;

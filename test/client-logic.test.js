@@ -114,6 +114,14 @@ t('parseAmountInput 無法解析回傳 NaN', () => {
   assert.ok(Number.isNaN(CL.parseAmountInput('1.2.3')));
   assert.ok(Number.isNaN(CL.parseAmountInput('12abc')));
 });
+t('parseAmountInput 負數回傳 NaN', () => {
+  assert.ok(Number.isNaN(CL.parseAmountInput('-5')));
+  assert.ok(Number.isNaN(CL.parseAmountInput('-1000.5')));
+  assert.ok(Number.isNaN(CL.parseAmountInput('-8,000')));
+});
+t('parseAmountInput 0 保持有效', () => {
+  assert.strictEqual(CL.parseAmountInput('0'), 0);
+});
 
 t('defaultColor 8 色循環', () => {
   assert.strictEqual(CL.defaultColor(0), '#3F7CFF');

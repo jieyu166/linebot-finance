@@ -10,7 +10,6 @@
     stats: null,
     budgets: [],
     budgetsYearMonth: null,
-    budgetsPending: false,
     budgetSheet: null,
     balances: [],
     editing: null,
@@ -519,14 +518,9 @@
   }
 
   function loadBudgets() {
-    state.budgetsPending = true;
     return api('apiBudgetUsage', state.yearMonth).then(function (list) {
       state.budgets = list || [];
       state.budgetsYearMonth = state.yearMonth;
-      state.budgetsPending = false;
-    }, function (err) {
-      state.budgetsPending = false;
-      throw err;
     });
   }
 
