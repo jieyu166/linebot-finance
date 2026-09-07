@@ -14,22 +14,23 @@ function include(name) {
 
 /**
  * 判斷目前呼叫者是否有權限使用網頁 App：
- * 於「只有我自己」部署時，Session.getActiveUser() 會回傳擁有者本人的 email，
- * 與 Session.getEffectiveUser()（腳本擁有者）相同；否則（例如 LINE 用的「所有人」部署）
- * getActiveUser() 會是空字串。另外提供 Script Property WEBAPP_TOKEN 作為備援：
- * 網址加 &t=token 亦可放行（未設定 WEBAPP_TOKEN 時此路徑一律不通過）。
+ * 主要機制是 Script Property WEBAPP_TOKEN：網址加 &t=token 即放行（未設定 WEBAPP_TOKEN
+ * 時此路徑一律不通過）。這條路徑排第一位是因為 identity 檢查在「執行身分：我」部署下
+ * 實際上永遠不會通過——Session.getActiveUser().getEmail() 對所有訪客（含擁有者本人）
+ * 一律回傳空字串，只有「執行身分：造訪應用程式的使用者」部署才會有值，所以不能靠它當
+ * 唯一防線。identity 檢查仍保留在第二順位，供未來改用該部署模式時自動生效。
  * @param {string} token - 呼叫端提供的權杖（doGet 的 e.parameter.t 或 App.html 傳入的第一個參數）
  * @returns {boolean}
  */
 function webAppAccessAllowed(token) {
+  var configuredToken = getConfig('WEBAPP_TOKEN');
+  if (configuredToken && String(configuredToken).trim() !== '' && token === configuredToken) { return true; }
+
   var activeEmail = '';
   try { activeEmail = Session.getActiveUser().getEmail(); } catch (e) { activeEmail = ''; }
   var effectiveEmail = '';
   try { effectiveEmail = Session.getEffectiveUser().getEmail(); } catch (e) { effectiveEmail = ''; }
   if (activeEmail && activeEmail === effectiveEmail) { return true; }
-
-  var configuredToken = getConfig('WEBAPP_TOKEN');
-  if (configuredToken && String(configuredToken).trim() !== '' && token === configuredToken) { return true; }
 
   return false;
 }

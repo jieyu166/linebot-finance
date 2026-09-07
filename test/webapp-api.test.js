@@ -477,5 +477,83 @@ t('匿名帶錯誤 WEBAPP_TOKEN 時：doGet 仍回 OK、api 仍拋「無權限�
   assert.throws(() => tokenGs.apiBootstrap('wrong', ss), /無權限使用此 App/);
 });
 
+// ---- setupWebAppToken / rotateWebAppToken ----
+
+function mapPropertiesService(initial) {
+  var store = Object.assign({}, initial || {});
+  return {
+    getScriptProperties: () => ({
+      getProperty: (key) => (Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null),
+      setProperty: (key, value) => { store[key] = value; },
+      setProperties: (obj) => { Object.assign(store, obj); }
+    }),
+    _store: store
+  };
+}
+
+function scriptAppWithUrl(url) {
+  return { getService: () => ({ getUrl: () => url }) };
+}
+
+function realUuidUtilities() {
+  const { Utilities: base } = require('./harness');
+  var n = 0;
+  return Object.assign({}, base, {
+    getUuid: () => { n++; return '12345678-1234-1234-1234-' + String(n).padStart(12, '0'); }
+  });
+}
+
+t('setupWebAppToken 未設定時產生 32 碼 token 並存起來，重複呼叫回傳同一個', () => {
+  const props = mapPropertiesService();
+  const cfgGs = loadGs(WEBAPP_FILES, { PropertiesService: props, ScriptApp: scriptAppWithUrl('https://script.google.com/macros/s/X/exec'), Utilities: realUuidUtilities() });
+  const token1 = cfgGs.setupWebAppToken();
+  assert.strictEqual(typeof token1, 'string');
+  assert.strictEqual(token1.length, 32);
+  const token2 = cfgGs.setupWebAppToken();
+  assert.strictEqual(token2, token1);
+  assert.strictEqual(props._store.WEBAPP_TOKEN, token1);
+});
+
+t('rotateWebAppToken 一律換新 token', () => {
+  const props = mapPropertiesService({ WEBAPP_TOKEN: 'old-token' });
+  const cfgGs = loadGs(WEBAPP_FILES, { PropertiesService: props, ScriptApp: scriptAppWithUrl('https://script.google.com/macros/s/X/exec') });
+  const rotated = cfgGs.rotateWebAppToken();
+  assert.notStrictEqual(rotated, 'old-token');
+  assert.strictEqual(props._store.WEBAPP_TOKEN, rotated);
+});
+
+t('setupWebAppToken 印出的網址含 ?ui=1&t=', () => {
+  const props = mapPropertiesService();
+  const logs = [];
+  const cfgGs = loadGs(WEBAPP_FILES, {
+    PropertiesService: props,
+    ScriptApp: scriptAppWithUrl('https://script.google.com/macros/s/X/exec'),
+    Logger: { log: (m) => logs.push(m) }
+  });
+  const token = cfgGs.setupWebAppToken();
+  const found = logs.some((m) => m.indexOf('?ui=1&t=' + token) !== -1);
+  assert.ok(found, '執行記錄應印出含 ?ui=1&t=' + token + ' 的網址，實際：' + logs.join(' | '));
+});
+
+t('setupWebAppToken 尚未部署時（getUrl 回傳空字串）印出提示訊息', () => {
+  const props = mapPropertiesService();
+  const logs = [];
+  const cfgGs = loadGs(WEBAPP_FILES, {
+    PropertiesService: props,
+    ScriptApp: scriptAppWithUrl(''),
+    Logger: { log: (m) => logs.push(m) }
+  });
+  cfgGs.setupWebAppToken();
+  const found = logs.some((m) => m.indexOf('尚未建立網頁應用程式部署') !== -1);
+  assert.ok(found, '應印出尚未部署提示，實際：' + logs.join(' | '));
+});
+
+t('webAppAccessAllowed：token 不對回傳 false，token 正確回傳 true（匿名 Session）', () => {
+  const props = mapPropertiesService({ WEBAPP_TOKEN: 'right-token' });
+  const anonGs = loadGs(WEBAPP_FILES, { Session: anonymousSession(), PropertiesService: props, ScriptApp: scriptAppWithUrl('https://script.google.com/macros/s/X/exec') });
+  assert.strictEqual(anonGs.webAppAccessAllowed('bad'), false);
+  assert.strictEqual(anonGs.webAppAccessAllowed('right-token'), true);
+});
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);

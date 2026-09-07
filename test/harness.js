@@ -58,7 +58,18 @@ function loadGs(files, extraGlobals) {
     getActiveUser: function() { return { getEmail: function() { return 'owner@example.com'; } }; },
     getEffectiveUser: function() { return { getEmail: function() { return 'owner@example.com'; } }; }
   };
-  const injected = Object.assign({ Utilities: utilities, Logger, LockService, HtmlService, ContentService, Session, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
+  const ScriptApp = { getService: function() { return { getUrl: function() { return 'https://script.google.com/macros/s/FAKE/exec'; } }; } };
+  const propsStore = {};
+  const PropertiesService = {
+    getScriptProperties: function() {
+      return {
+        getProperty: function(key) { return Object.prototype.hasOwnProperty.call(propsStore, key) ? propsStore[key] : null; },
+        setProperty: function(key, value) { propsStore[key] = value; },
+        setProperties: function(obj) { Object.assign(propsStore, obj); }
+      };
+    }
+  };
+  const injected = Object.assign({ Utilities: utilities, Logger, LockService, HtmlService, ContentService, Session, SpreadsheetApp: {}, PropertiesService: PropertiesService, ScriptApp: ScriptApp }, extraGlobals || {});
 
   const injectedKeys = Object.keys(injected);
   injectedKeys.forEach(function(k) { global[k] = injected[k]; });

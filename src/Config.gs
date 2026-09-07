@@ -50,9 +50,56 @@ function initializeProperties() {
     'LINE_CHANNEL_SECRET': '請替換為你的 LINE Channel Secret',
     'LINE_CHANNEL_ACCESS_TOKEN': '請替換為你的 LINE Channel Access Token',
     'SHEET_ID': '請替換為你的 Google 試算表 ID',
-    'WEBAPP_TOKEN': '（選填）自訂一串隨機字串，App 網址加 &t=該字串 可繞過身分檢查'
+    'WEBAPP_TOKEN': '執行 setupWebAppToken() 自動產生'
   });
   Logger.log('Script Properties 已初始化，請確認已替換為實際值');
+}
+
+/**
+ * 確保 Script Property WEBAPP_TOKEN 存在（不存在則自動產生一組 32 碼隨機字串並存起來），
+ * 並在「執行記錄」印出加了 ?ui=1&t=token 的完整 App 網址，方便直接複製貼到手機瀏覽器。
+ * 由於「執行身分：我」部署下 Session.getActiveUser().getEmail() 對所有訪客（含擁有者本人）
+ * 一律回傳空字串，身分檢查永遠不會通過，所以 token 是唯一可行、零手動設定的放行機制——
+ * 已存在 token 時直接沿用，不會每次執行都換新網址。
+ * @returns {string} 目前使用中的 WEBAPP_TOKEN
+ */
+function setupWebAppToken() {
+  var props = PropertiesService.getScriptProperties();
+  var token = props.getProperty('WEBAPP_TOKEN');
+  if (!token || String(token).trim() === '') {
+    token = Utilities.getUuid().replace(/-/g, '');
+    props.setProperty('WEBAPP_TOKEN', token);
+  }
+  logWebAppTokenUrl_(token);
+  return token;
+}
+
+/**
+ * 強制產生一組新的 WEBAPP_TOKEN 並覆蓋既有值（用來作廢舊網址），
+ * 同樣在「執行記錄」印出新的 App 網址。
+ * @returns {string} 新產生的 WEBAPP_TOKEN
+ */
+function rotateWebAppToken() {
+  var props = PropertiesService.getScriptProperties();
+  var token = Utilities.getUuid().replace(/-/g, '');
+  props.setProperty('WEBAPP_TOKEN', token);
+  logWebAppTokenUrl_(token);
+  return token;
+}
+
+/**
+ * 在「執行記錄」印出目前部署網址加上 ?ui=1&t=token 的完整 App 網址；
+ * 尚未部署（ScriptApp.getService().getUrl() 回傳空值）時改印提示訊息。
+ * @param {string} token - 要組進網址的 WEBAPP_TOKEN
+ */
+function logWebAppTokenUrl_(token) {
+  var url = '';
+  try { url = ScriptApp.getService().getUrl(); } catch (e) { url = ''; }
+  if (!url) {
+    Logger.log('尚未建立網頁應用程式部署，請先「部署 → 新增部署」再執行一次');
+    return;
+  }
+  Logger.log('App 網址（加到主畫面用）：' + url + '?ui=1&t=' + token);
 }
 
 /**

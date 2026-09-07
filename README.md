@@ -175,12 +175,12 @@ openspec/
 
 App 與 LINE Webhook 是**同一份程式碼的兩個部署**：
 
-> ⚠️ **事前準備**：部署前確認 4 個 HTML 檔案（Index、Styles、ClientLogic、App）已在 Apps Script 編輯器建立，否則部署後開啟 `?ui=1` 會出錯。
+> ⚠️ **事前準備**：部署前確認 4 個 HTML 檔案已在 Apps Script 編輯器建立，檔名必須完全是 `Index`、`Styles`、`ClientLogic`、`App`（大小寫要一致，`index` 不行），否則部署後開啟 `?ui=1` 會出錯。
 
 1. 在 Apps Script 編輯器右上角「部署 → 新增部署作業」，類型選「網頁應用程式」。
 2. 執行身分選「我」，存取權選「只有我自己」（與 LINE 部署的「所有人」不同，App 部署不對外開放）。
-3. 部署後取得該部署的網址，在網址結尾加上 `?ui=1`（例如 `https://script.google.com/macros/s/.../exec?ui=1`），才會進入 App 主頁；不加 `ui=1` 會回傳 `OK`（維持 LINE 部署驗證用的行為）。
-4. 用手機瀏覽器（建議 Android Chrome）開啟該網址並登入自己的 Google 帳號，選單「加到主畫面」即可像原生 App 一樣從桌面啟動。
+3. 在 Apps Script 編輯器選取並執行 `setupWebAppToken()`，執行完成後打開「執行記錄」，複製印出的那一行「App 網址（加到主畫面用）：…」。
+4. 用手機瀏覽器（建議 Android Chrome）開啟複製到的網址，選單「加到主畫面」即可像原生 App 一樣從桌面啟動。
 
 LINE 部署與 App 部署共用同一份試算表，資料即時互通；LINE 記帳的內容會立即出現在 App，App 新增的交易也能被 LINE 的「餘額」指令查到。
 
@@ -188,15 +188,13 @@ LINE 部署與 App 部署共用同一份試算表，資料即時互通；LINE �
 
 LINE Webhook 部署一定要設「所有人」都能存取才收得到 LINE 平台的訊息，但這代表任何人只要拿到那個部署網址、加上 `?ui=1`，理論上都能打開記帳 App 的畫面。為避免這種情況，系統有兩層保護：
 
-1. **部署層級**：手機 App 走的是另一個獨立部署，存取權選「只有我自己」（見上方步驟 2）。用這個部署的網址開啟 `?ui=1`，Google 會先要求登入你自己的帳號才放行。
-2. **身分檢查**：即使有人改用 LINE 那個「所有人」的部署網址硬加 `?ui=1`，後端 `doGet` 與每個 `api*` 函式都會再檢查一次目前登入者是否等於腳本擁有者（`Session.getActiveUser()` 是否等於 `Session.getEffectiveUser()`）；不符合就一律回傳 `OK`（不會顯示 App 畫面、也不透露原因），呼叫任何 `api*` 都會拋出「無權限使用此 App」。
-
-如果開啟「只有我自己」部署的網址時卻顯示「無權限使用此 App」或整頁空白（例如公司網路的 Google 帳號限制、或用非登入的無痕視窗開啟），可以在 Apps Script 專案的 Script Properties 新增一個 `WEBAPP_TOKEN`（自訂一串隨機字串），之後在網址結尾加上 `&t=你設定的字串`（例如 `...exec?ui=1&t=你的權杖`）即可繞過身分檢查。這個權杖只是備援機制，請自行保管好、不要外流。
+1. **部署層級**：手機 App 走的是另一個獨立部署，存取權選「只有我自己」（見上方步驟 2）。這一層需要 Google 登入，但「執行身分：我」的部署下 `Session.getActiveUser().getEmail()` 對所有訪客（含擁有者本人）一律回傳空字串，無法單靠這層自動辨識出擁有者，因此不能省略下面第 2 道鎖。
+2. **網址 token**：`setupWebAppToken()` 自動產生的 `WEBAPP_TOKEN` 就是第二道鎖，網址結尾要帶 `&t=你的權杖` 才能看到 App 畫面（例如 `...exec?ui=1&t=你的權杖`）；帶錯或不帶都只會看到純文字 `OK`（不會顯示 App 畫面、也不透露原因），呼叫任何 `api*` 都會拋出「無權限使用此 App」。**不要把這組網址貼給別人**；要作廢舊網址就在編輯器執行 `rotateWebAppToken()`，換一組新 token 再重新從「執行記錄」複製新網址。
 
 ### 部署後的完整檢查清單
 
-- 訪問 `?ui=1`（未帶 `t`）在自己登入的瀏覽器上要能看到 App 畫面；用無痕視窗（未登入）開啟同一網址應該只看到 `OK`。
-- 若設定了 `WEBAPP_TOKEN`，帶正確 `&t=...` 應能看到 App 畫面；帶錯誤的 token 應該跟未帶一樣只看到 `OK`。
+- 帶正確 `&t=...` 應能看到 App 畫面；帶錯誤或不帶 token 都應該只看到 `OK`。
+- 執行 `rotateWebAppToken()` 後，舊 token 的網址應變成只看到 `OK`，新網址才能看到 App 畫面。
 
 ### 四個分頁
 
@@ -240,7 +238,7 @@ LINE Webhook 部署一定要設「所有人」都能存取才收得到 LINE 平�
 
 - LINE 部署與 App 部署是**同一份程式碼的兩個部署**，改程式碼時兩邊都要重新部署（或用同一個部署版本）才會同步生效。
 - App 的所有操作都**即時寫入試算表**，沒有離線暫存，也不做樂觀更新以外的快取；換句話說沒有網路連線時 **App 無法使用**。
-- App 部署存取權設為「只有我自己」，只有登入該 Google 帳號的使用者能開啟；忘記帶 `?ui=1` 會看到純文字 `OK`。
+- App 部署存取權設為「只有我自己」，但實際放行機制是網址裡的 `&t=token`；忘記帶 `?ui=1` 或 `&t=...` 都會看到純文字 `OK`。
 
 ## 設定步驟
 
@@ -248,7 +246,7 @@ LINE Webhook 部署一定要設「所有人」都能存取才收得到 LINE 平�
 2. 建立 LINE Official Account + Messaging API Channel
 3. 取得 OpenAI API Key
 4. 從試算表「擴充功能 → Apps Script」開啟編輯器
-5. 建立 9 個 .gs 檔案（Config、Main、LineService、OpenAIService、SheetService、PdfService、TransferService、WebApp、WebAppLogic）與 4 個 HTML 檔案（Index、Styles、ClientLogic、App），貼入 `src/` 下的程式碼。HTML 檔在 Apps Script 編輯器用「新增 → HTML」建立，檔名不含副檔名。
+5. 建立 9 個 .gs 檔案（Config、Main、LineService、OpenAIService、SheetService、PdfService、TransferService、WebApp、WebAppLogic）與 4 個 HTML 檔案（Index、Styles、ClientLogic、App），貼入 `src/` 下的程式碼。HTML 檔在 Apps Script 編輯器用「新增 → HTML」建立，檔名不含副檔名，且必須完全是 `Index`、`Styles`、`ClientLogic`、`App`（大小寫要一致，`index` 不行）。
 6. 啟用 Drive API 進階服務
 7. 設定 Script Properties（OPENAI_API_KEY、LINE_CHANNEL_SECRET、LINE_CHANNEL_ACCESS_TOKEN、SHEET_ID；可選填 OPENAI_MODEL 覆寫預設的 gpt-4.1-mini）
 8. 執行 `initializeSheets()` 建立工作表結構（已存在的工作表不會被覆蓋）
