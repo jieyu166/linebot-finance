@@ -2,7 +2,8 @@ const assert = require('assert');
 const { loadGs } = require('./harness');
 const { fakeSheet, fakeSheetWithHeader, fakeSs } = require('./fakes');
 
-const gs = loadGs(['SheetService.gs', 'TransferService.gs', 'WebAppLogic.gs', 'Main.gs', 'WebApp.gs']);
+const WEBAPP_FILES = ['SheetService.gs', 'TransferService.gs', 'WebAppLogic.gs', 'Main.gs', 'WebApp.gs'];
+const gs = loadGs(WEBAPP_FILES);
 
 let failed = 0;
 function t(name, fn) {
@@ -259,6 +260,93 @@ t('apiRenameCategory 改交易與預算並回傳筆數', () => {
   assert.strictEqual(txSheet._data[3][4], '飲食');
   assert.strictEqual(budSheet._data[1][1], '餐飲');
   assert.strictEqual(budSheet._data[2][1], '飲食'); // 帳戶類不改
+});
+
+t('apiRenameCategory 用 LockService 包住讀寫，正常結束時 waitLock/releaseLock 各呼叫一次', () => {
+  const txSheet = fakeSheet([
+    ['2026/09/01', '現金', '現金', '支出', '飲食', '午餐', '', 'TWD', 80, 'App', 'i1', '']
+  ]);
+  const budSheet = budgetSheet([['分類', '飲食', 8000]]);
+  const ss = baseSs({ '交易紀錄': txSheet, '預算': budSheet });
+  let waitLockCalls = 0;
+  let releaseLockCalls = 0;
+  const gsWithLock = loadGs(WEBAPP_FILES, {
+    LockService: {
+      getScriptLock: () => ({
+        waitLock: () => { waitLockCalls++; },
+        releaseLock: () => { releaseLockCalls++; },
+        tryLock: () => true
+      })
+    }
+  });
+  const out = gsWithLock.apiRenameCategory('支出', '飲食', '餐飲', ss);
+  assert.deepStrictEqual(out, { changedTransactions: 1, changedBudgets: 1 });
+  assert.strictEqual(waitLockCalls, 1);
+  assert.strictEqual(releaseLockCalls, 1);
+});
+
+t('apiRenameCategory 寫入時拋錯，releaseLock 仍會被呼叫且錯誤會傳出', () => {
+  const txSheet = fakeSheet([
+    ['2026/09/01', '現金', '現金', '支出', '飲食', '午餐', '', 'TWD', 80, 'App', 'i1', '']
+  ]);
+  const ss = baseSs({ '交易紀錄': txSheet, '預算': budgetSheet([]) });
+  // 讓交易紀錄工作表的 setValue 拋錯一次，模擬寫入失敗
+  const originalGetRange = txSheet.getRange;
+  txSheet.getRange = function() {
+    const range = originalGetRange.apply(txSheet, arguments);
+    const originalSetValue = range.setValue;
+    range.setValue = function() { throw new Error('模擬寫入失敗'); };
+    return range;
+  };
+  let waitLockCalls = 0;
+  let releaseLockCalls = 0;
+  const gsWithLock = loadGs(WEBAPP_FILES, {
+    LockService: {
+      getScriptLock: () => ({
+        waitLock: () => { waitLockCalls++; },
+        releaseLock: () => { releaseLockCalls++; },
+        tryLock: () => true
+      })
+    }
+  });
+  assert.throws(() => gsWithLock.apiRenameCategory('支出', '飲食', '餐飲', ss), /模擬寫入失敗/);
+  assert.strictEqual(waitLockCalls, 1);
+  assert.strictEqual(releaseLockCalls, 1);
+});
+
+t('apiRenameCategory newName 空白時拋「分類名稱不可空白」', () => {
+  const ss = baseSs();
+  assert.throws(() => gs.apiRenameCategory('支出', '飲食', '   ', ss), /分類名稱不可空白/);
+});
+
+t('apiRenameCategory oldName 等於 newName 時為 no-op', () => {
+  const txSheet = fakeSheet([
+    ['2026/09/01', '現金', '現金', '支出', '飲食', '午餐', '', 'TWD', 80, 'App', 'i1', '']
+  ]);
+  const ss = baseSs({ '交易紀錄': txSheet });
+  const out = gs.apiRenameCategory('支出', '飲食', '飲食', ss);
+  assert.deepStrictEqual(out, { changedTransactions: 0, changedBudgets: 0 });
+  assert.strictEqual(txSheet._data[1][4], '飲食'); // 未被改動
+});
+
+t('apiRenameCategory newName 已是另一個既存分類時拋「分類「X」已存在」', () => {
+  const catSheet = categorySheet([['飲食', '🍜', '#F5A623'], ['餐飲', '🍚', '#F5A623']]);
+  const ss = baseSs({ '支出分類': catSheet });
+  assert.throws(() => gs.apiRenameCategory('支出', '飲食', '餐飲', ss), /分類「餐飲」已存在/);
+});
+
+t('apiSaveCategory 更名為既存分類時仍會拋「已存在」錯誤', () => {
+  const catSheet = categorySheet([['飲食', '🍜', '#F5A623'], ['餐飲', '🍚', '#F5A623']]);
+  const ss = baseSs({ '支出分類': catSheet });
+  assert.throws(() => gs.apiSaveCategory({ type: '支出', name: '餐飲', oldName: '飲食', icon: '🍜', color: '#F5A623' }, ss), /分類「餐飲」已存在/);
+});
+
+t('apiSaveTransaction 接受字串金額並轉為數字儲存', () => {
+  const sheet = fakeSheet([]);
+  const ss = baseSs({ '交易紀錄': sheet });
+  const out = gs.apiSaveTransaction({ date: '2026/09/07', account: '玉山', type: '支出', category: '飲食', item: '午餐', amount: '80', currency: 'TWD' }, ss);
+  assert.strictEqual(sheet._data[1][8], 80);
+  assert.strictEqual(out.amount, 80);
 });
 
 // ---- include / doGet ----

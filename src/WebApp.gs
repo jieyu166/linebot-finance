@@ -282,11 +282,16 @@ function apiSaveCategory(params, ss) {
   try {
     ss = getSpreadsheet(ss);
     var sheetName = params.type === '支出' ? '支出分類' : '收入分類';
-    var result = upsertCategory(sheetName, params, ss);
     var oldName = String(params.oldName || '').trim();
     var name = String(params.name || '').trim();
+    var renameResult = null;
     if (oldName !== '' && oldName !== name) {
-      var renameResult = apiRenameCategory(params.type, oldName, name, ss);
+      // 先改交易／預算的分類名稱，此時分類表仍是 oldName，不會被 apiRenameCategory
+      // 的重複檢查誤判成「newName 已存在」；分類表本身的改名交給下面的 upsertCategory。
+      renameResult = apiRenameCategory(params.type, oldName, name, ss);
+    }
+    var result = upsertCategory(sheetName, params, ss);
+    if (renameResult) {
       result.changedTransactions = renameResult.changedTransactions;
       result.changedBudgets = renameResult.changedBudgets;
     }
@@ -307,23 +312,44 @@ function apiSaveCategory(params, ss) {
 function apiRenameCategory(type, oldName, newName, ss) {
   try {
     ss = getSpreadsheet(ss);
+    var trimmedOldName = String(oldName || '').trim();
+    var trimmedNewName = String(newName || '').trim();
+    if (trimmedNewName === '') { throw new Error('分類名稱不可空白'); }
+    if (normalizeName(trimmedOldName) === normalizeName(trimmedNewName)) {
+      return { changedTransactions: 0, changedBudgets: 0 };
+    }
+
+    // 重複檢查：只有當「舊名」與「新名」同時存在於分類表時才視為衝突——
+    // apiSaveCategory 會先呼叫本函式再改分類表本身，此時分類表仍是 oldName，
+    // 不會誤判；若呼叫端直接把 newName 傳成一個「已存在且與 oldName 不同」的
+    // 分類，才會在這裡擋下來。
+    var categorySheetName = type === '支出' ? '支出分類' : '收入分類';
+    var categoryRows = getCategoryRows(categorySheetName, ss);
+    var hasOldName = categoryRows.some(function(r) { return normalizeName(r.name) === normalizeName(trimmedOldName); });
+    var hasNewName = categoryRows.some(function(r) { return normalizeName(r.name) === normalizeName(trimmedNewName); });
+    if (hasOldName && hasNewName) { throw new Error('分類「' + trimmedNewName + '」已存在'); }
+
     var sheet = ss.getSheetByName('交易紀錄');
     var rows = getTransactionRows(ss);
-    var replaced = replaceCategoryInRows(rows, type, oldName, newName);
-    replaced.changedRowIndexes.forEach(function(rowIndex) {
-      sheet.getRange(rowIndex, 5, 1, 1).setValue(newName);
-    });
+    var replaced = replaceCategoryInRows(rows, type, trimmedOldName, trimmedNewName);
 
     var budgetSheet = ss.getSheetByName('預算');
-    var changedBudgets = 0;
-    getBudgets(ss).forEach(function(b) {
-      if (b.kind === '分類' && b.name === oldName) {
-        budgetSheet.getRange(b.rowIndex, 2, 1, 1).setValue(newName);
-        changedBudgets++;
-      }
+    var budgetsToChange = getBudgets(ss).filter(function(b) {
+      return b.kind === '分類' && b.name === trimmedOldName;
     });
 
-    return { changedTransactions: replaced.changedRowIndexes.length, changedBudgets: changedBudgets };
+    var lock = LockService.getScriptLock(); lock.waitLock(10000);
+    try {
+      replaced.changedRowIndexes.forEach(function(rowIndex) {
+        sheet.getRange(rowIndex, 5, 1, 1).setValue(trimmedNewName);
+      });
+      budgetsToChange.forEach(function(b) {
+        budgetSheet.getRange(b.rowIndex, 2, 1, 1).setValue(trimmedNewName);
+      });
+      return { changedTransactions: replaced.changedRowIndexes.length, changedBudgets: budgetsToChange.length };
+    } finally {
+      lock.releaseLock();
+    }
   } catch (e) {
     throw new Error(e && e.message ? e.message : String(e));
   }
