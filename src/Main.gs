@@ -3,9 +3,20 @@
  */
 
 /**
- * GET 請求處理（部署驗證用）
+ * GET 請求處理：帶 ui=1 且通過身分檢查時回傳網頁 App 主頁，否則一律回傳 'OK'
+ * （不透露原因：未帶 ui=1、或帶 ui=1 但權限檢查未通過，回應相同）
+ * @param {Object} e - GET 事件物件
+ * @returns {HtmlOutput|TextOutput}
  */
 function doGet(e) {
+  var token = (e && e.parameter && e.parameter.t) || '';
+  if (e && e.parameter && e.parameter.ui === '1' && webAppAccessAllowed(token)) {
+    var tpl = HtmlService.createTemplateFromFile('Index');
+    tpl.token = token;
+    return tpl.evaluate()
+      .setTitle('記帳')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+  }
   return ContentService.createTextOutput('OK');
 }
 

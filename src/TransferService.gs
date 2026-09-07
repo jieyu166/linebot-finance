@@ -26,7 +26,7 @@ function hasFxHint(tx) { return /換匯/.test((tx.description || '') + (tx.item 
  * @param {Object} tx - 目標交易
  * @param {Object[]} allTx - 全部交易
  * @param {Object[]} accounts - 帳戶清單
- * @param {Object} [options] - { dayWindow, counterpartyAccount, counterpartyBank }
+ * @param {Object} [options] - { dayWindow, counterpartyAccount, counterpartyBank, anyCategory }
  * @returns {Object[]} 候選交易陣列
  */
 function pickTransferCandidates(tx, allTx, accounts, options) {
@@ -39,7 +39,7 @@ function pickTransferCandidates(tx, allTx, accounts, options) {
   var oppositeType = tx.type === '支出' ? '收入' : '支出';
   return allTx.filter(function(o) {
     if (o.id === tx.id || o.transferId || o.type !== oppositeType) { return false; }
-    if (o.category !== '轉帳' && o.category !== '') { return false; }
+    if (!options.anyCategory && o.category !== '轉帳' && o.category !== '') { return false; }
     if (normalizeName(o.account) === normalizeName(tx.account)) { return false; }
     var oa = findAccountByName(accounts, o.account);
     if (!oa) { return false; }
@@ -69,7 +69,8 @@ function findTransactionsByIds(ids, ss) {
 }
 
 /**
- * 寫入轉帳ID（L 欄）與可選分類（E 欄）到指定交易列
+ * 寫入轉帳ID（L 欄）與可選分類（E 欄）到指定交易列；若會覆寫掉一個非「轉帳」、非空白的
+ * 既有分類，先把該分類記錄追加到明細描述（G 欄），避免改分類後原資訊永久遺失
  * @param {Object[]} txs - 交易物件陣列（需含 rowIndex）
  * @param {string} transferId - 轉帳ID，清空時傳 ''
  * @param {string} [category] - 分類名稱，未傳則不改動 E 欄
@@ -79,7 +80,15 @@ function writeTransferCells(txs, transferId, category, ss) {
   var sheet = getSpreadsheet(ss).getSheetByName('交易紀錄');
   txs.forEach(function(tx) {
     sheet.getRange(tx.rowIndex, 12, 1, 1).setValue(transferId);
-    if (category) { sheet.getRange(tx.rowIndex, 5, 1, 1).setValue(category); }
+    if (category) {
+      var oldCategory = tx.category || '';
+      if (oldCategory && oldCategory !== category) {
+        var newDescription = (tx.description || '') + '（原分類：' + oldCategory + '）';
+        sheet.getRange(tx.rowIndex, 7, 1, 1).setValue(newDescription);
+        tx.description = newDescription;
+      }
+      sheet.getRange(tx.rowIndex, 5, 1, 1).setValue(category);
+    }
   });
 }
 

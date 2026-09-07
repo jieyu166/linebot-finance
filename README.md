@@ -44,20 +44,28 @@ Google Apps Script (Web App)
 ```
 src/
 ├── Config.gs          # Script Properties 存取、初始化、預設帳戶清單
-├── Main.gs            # doPost() 進入點、訊息路由、餘額指令、匯入摘要
+├── Main.gs            # doGet()／doPost() 進入點、訊息路由、餘額指令、匯入摘要
 ├── LineService.gs     # LINE API 互動
 ├── OpenAIService.gs   # OpenAI API 呼叫、Prompt 設計
 ├── SheetService.gs    # Google 試算表讀寫、餘額計算
 ├── PdfService.gs      # PDF OCR 文字擷取
-└── TransferService.gs # 轉帳配對核心（自動配對、手動連結、信用卡／證券帳戶判斷、舊資料搬移）
+├── TransferService.gs # 轉帳配對核心（自動配對、手動連結、信用卡／證券帳戶判斷、舊資料搬移）
+├── WebApp.gs           # 網頁 App 的 google.script.run API 入口（apiBootstrap、apiSaveTransaction…）
+├── WebAppLogic.gs      # 網頁 App 用純邏輯（月份篩選、分類彙總、預算彙總，不碰試算表）
+├── Index.html          # 網頁 App 主頁模板，用 include() 組合 Styles/ClientLogic/App
+├── Styles.html          # 網頁 App 的 CSS
+├── ClientLogic.html     # 前端純函式（金額計算機、日期、圓餅圖切片、預算顏色…）
+└── App.html             # 前端主程式（四分頁渲染、事件處理、狀態管理）
 test/
-├── *.test.js          # Node 測試（餘額、帳戶、交易、轉帳配對、匯入流程…）
+├── *.test.js          # Node 測試（餘額、帳戶、交易、轉帳配對、匯入流程、網頁 App API…）
 ├── fakes.js、harness.js # 測試用 GAS 全域物件 stub
-└── fixtures/           # 使用者提供的真實帳單與預期結果（已加入 .gitignore，不上傳）
+├── fixtures/           # 使用者提供的真實帳單與預期結果（已加入 .gitignore，不上傳）
+└── manual/             # 手動視覺預覽用的獨立 HTML（如 stats-preview.html，脫離 GAS 直接在瀏覽器打開）
 openspec/
 ├── specs/             # 現行規格（text-accounting、pdf-batch-import、
 │                      #   dynamic-categories、account-management、balance-query、
-│                      #   transfer-pairing、credit-card-accounts）
+│                      #   transfer-pairing、credit-card-accounts、webapp-transactions、
+│                      #   budget、category-management）
 └── changes/           # 變更提案（Spectra 規格驅動開發）
 ```
 
@@ -159,13 +167,88 @@ openspec/
 
 **收入（10 項）**：薪資、利息、兼職、獎金、回饋、投資獲利、股利、家人給、保險、其他
 
+## 手機 App（網頁版）
+
+除了 LINE 記帳，同一份 Apps Script 專案也提供一個手機優先的網頁 App，可直接瀏覽、新增、編輯交易，不必透過 LINE 對話。
+
+### 部署
+
+App 與 LINE Webhook 是**同一份程式碼的兩個部署**：
+
+> ⚠️ **事前準備**：部署前確認 4 個 HTML 檔案（Index、Styles、ClientLogic、App）已在 Apps Script 編輯器建立，否則部署後開啟 `?ui=1` 會出錯。
+
+1. 在 Apps Script 編輯器右上角「部署 → 新增部署作業」，類型選「網頁應用程式」。
+2. 執行身分選「我」，存取權選「只有我自己」（與 LINE 部署的「所有人」不同，App 部署不對外開放）。
+3. 部署後取得該部署的網址，在網址結尾加上 `?ui=1`（例如 `https://script.google.com/macros/s/.../exec?ui=1`），才會進入 App 主頁；不加 `ui=1` 會回傳 `OK`（維持 LINE 部署驗證用的行為）。
+4. 用手機瀏覽器（建議 Android Chrome）開啟該網址並登入自己的 Google 帳號，選單「加到主畫面」即可像原生 App 一樣從桌面啟動。
+
+LINE 部署與 App 部署共用同一份試算表，資料即時互通；LINE 記帳的內容會立即出現在 App，App 新增的交易也能被 LINE 的「餘額」指令查到。
+
+### 存取權限（雙重保護）
+
+LINE Webhook 部署一定要設「所有人」都能存取才收得到 LINE 平台的訊息，但這代表任何人只要拿到那個部署網址、加上 `?ui=1`，理論上都能打開記帳 App 的畫面。為避免這種情況，系統有兩層保護：
+
+1. **部署層級**：手機 App 走的是另一個獨立部署，存取權選「只有我自己」（見上方步驟 2）。用這個部署的網址開啟 `?ui=1`，Google 會先要求登入你自己的帳號才放行。
+2. **身分檢查**：即使有人改用 LINE 那個「所有人」的部署網址硬加 `?ui=1`，後端 `doGet` 與每個 `api*` 函式都會再檢查一次目前登入者是否等於腳本擁有者（`Session.getActiveUser()` 是否等於 `Session.getEffectiveUser()`）；不符合就一律回傳 `OK`（不會顯示 App 畫面、也不透露原因），呼叫任何 `api*` 都會拋出「無權限使用此 App」。
+
+如果開啟「只有我自己」部署的網址時卻顯示「無權限使用此 App」或整頁空白（例如公司網路的 Google 帳號限制、或用非登入的無痕視窗開啟），可以在 Apps Script 專案的 Script Properties 新增一個 `WEBAPP_TOKEN`（自訂一串隨機字串），之後在網址結尾加上 `&t=你設定的字串`（例如 `...exec?ui=1&t=你的權杖`）即可繞過身分檢查。這個權杖只是備援機制，請自行保管好、不要外流。
+
+### 部署後的完整檢查清單
+
+- 訪問 `?ui=1`（未帶 `t`）在自己登入的瀏覽器上要能看到 App 畫面；用無痕視窗（未登入）開啟同一網址應該只看到 `OK`。
+- 若設定了 `WEBAPP_TOKEN`，帶正確 `&t=...` 應能看到 App 畫面；帶錯誤的 token 應該跟未帶一樣只看到 `OK`。
+
+### 四個分頁
+
+| 分頁 | 功能 |
+|------|------|
+| 紀錄 | 依月份瀏覽交易，依日期分組並顯示當日收支小計；點一筆交易開啟編輯頁；轉帳配對成功的列會顯示「⇄ 對方帳戶」 |
+| 預算 | 顯示各項目（分類或帳戶）的預算使用進度條，可新增／編輯／刪除預算 |
+| 統計 | 依分類的圓餅圖與明細列表，支出／收入切換；點分類可跳回紀錄頁並篩選該分類 |
+| 帳戶 | 依【資產】【信用卡】兩區列出所有啟用帳戶目前餘額，可編輯帳戶的初始餘額／初始日期／帳戶類型；⚙ 按鈕開啟分類管理面板 |
+
+### 新增／編輯交易
+
+點右下角「＋」開啟編輯頁，以計算機鍵盤輸入金額（支援 ＋－×÷）；支出／收入／轉帳三段式切換：
+
+- **支出／收入**：選分類（圖示網格）、帳戶、日期、品項、備註。
+- **轉帳模式**：選轉出帳戶、轉入帳戶、日期、備註；兩帳戶幣別不同時額外顯示「轉入金額」欄位。轉出與轉入帳戶不可相同。
+
+編輯既有交易時，畫面下方會有「刪除」按鈕；若該筆已配對轉帳，改顯示「解除連結」，否則顯示「連結為轉帳」（開啟候選清單，7 天內、不限分類，選一筆確認後即連結）。刪除已配對的交易時會詢問是否一併刪除對方那筆。
+
+### 分類管理
+
+帳戶分頁的 ⚙ 按鈕開啟分類管理面板，支出／收入切換頁籤，列出各分類的圖示與名稱；點一筆可編輯名稱／圖示（最多 2 字）／顏色，或按「＋ 新增分類」新增。**更改名稱時**（更名連動），系統會先跳出確認「歷史交易與預算會一併改名，繼續？」，確認後在同一把鎖內原子性地把既有交易紀錄的分類欄、預算表中以該分類設定的預算、以及分類表本身的名稱一併改掉，避免資料不一致。只改圖示／顏色不觸發此確認。
+
+### 預算
+
+在預算分頁按「＋ 新增預算」，選「分類」或「帳戶」後挑一個尚未設定預算的項目，輸入每月預算金額；輸入 0 即刪除該預算。每個項目以進度條顯示使用比例，未達 80% 為綠色、80%–100% 為橘色（警示）、100% 以上為紅色（超支）；預算使用金額排除已配對轉帳（如繳信用卡、帳戶間轉帳）。
+
+### 統計
+
+依所選月份與支出／收入類型，彙總各分類金額與占比繪成圓餅圖，並列出明細（金額、百分比）；已配對轉帳的交易不計入統計。
+
+### 帳戶
+
+列出所有啟用帳戶目前餘額，信用卡帳戶顯示「未繳 $X」，其餘顯示原始餘額。點一筆帳戶可編輯其初始餘額、初始日期、帳戶類型（現金／銀行／信用卡／證券）。
+
+### 轉帳連結
+
+編輯交易頁的「連結為轉帳」會呼叫 7 天內、不限分類的候選搜尋（比自動配對用的 3 天、限「轉帳」分類更寬鬆），適合手動處理自動配對沒抓到的情況；同幣別仍需金額相符，跨幣別不比對金額，但仍需同一天且描述／品項含換匯線索。
+
+### 注意事項
+
+- LINE 部署與 App 部署是**同一份程式碼的兩個部署**，改程式碼時兩邊都要重新部署（或用同一個部署版本）才會同步生效。
+- App 的所有操作都**即時寫入試算表**，沒有離線暫存，也不做樂觀更新以外的快取；換句話說沒有網路連線時 **App 無法使用**。
+- App 部署存取權設為「只有我自己」，只有登入該 Google 帳號的使用者能開啟；忘記帶 `?ui=1` 會看到純文字 `OK`。
+
 ## 設定步驟
 
 1. 建立 Google 試算表
 2. 建立 LINE Official Account + Messaging API Channel
 3. 取得 OpenAI API Key
 4. 從試算表「擴充功能 → Apps Script」開啟編輯器
-5. 建立 7 個 .gs 檔案（含 `TransferService.gs`），貼入 `src/` 下的程式碼
+5. 建立 9 個 .gs 檔案（Config、Main、LineService、OpenAIService、SheetService、PdfService、TransferService、WebApp、WebAppLogic）與 4 個 HTML 檔案（Index、Styles、ClientLogic、App），貼入 `src/` 下的程式碼。HTML 檔在 Apps Script 編輯器用「新增 → HTML」建立，檔名不含副檔名。
 6. 啟用 Drive API 進階服務
 7. 設定 Script Properties（OPENAI_API_KEY、LINE_CHANNEL_SECRET、LINE_CHANNEL_ACCESS_TOKEN、SHEET_ID；可選填 OPENAI_MODEL 覆寫預設的 gpt-4.1-mini）
 8. 執行 `initializeSheets()` 建立工作表結構（已存在的工作表不會被覆蓋）
@@ -178,7 +261,7 @@ openspec/
 已在使用舊版（7 欄帳戶管理、無轉帳配對）的使用者，依序執行：
 
 ```
-1. 貼上最新 src/*.gs（含新檔 TransferService.gs，共 7 個檔案）
+1. 貼上最新 src/ 全部檔案：9 個 .gs（新增 WebApp.gs、WebAppLogic.gs）與 4 個 HTML（Index、Styles、ClientLogic、App，用「新增 → HTML」建立）
 2. 執行 initializeSheets()（補標題、預算表、收入分類「轉帳」、缺少的帳戶；若已執行過 runMigrations() 且結果不對，先執行 undoMigrations() 還原）
 3. 執行 backfillTransactionIds()
 4. 編輯 Config.gs 的 INITIAL_BALANCES（銀行填 8/31 實際餘額；信用卡填最近一期本期應繳的負數與該期結帳日），執行 previewInitialBalances() 確認，再執行 applyInitialBalances()

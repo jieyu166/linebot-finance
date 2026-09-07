@@ -8,3 +8,4 @@ openspec/.vector-search.db*
 .env
 *.log
 test/fixtures/
+.superpowers/

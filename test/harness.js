@@ -45,7 +45,20 @@ function loadGs(files, extraGlobals) {
     getUuid: function() { uuidCounter++; return 'uuid-' + String(uuidCounter).padStart(4, '0'); }
   });
   const LockService = { getScriptLock: () => ({ waitLock() {}, releaseLock() {}, tryLock() { return true; } }) };
-  const injected = Object.assign({ Utilities: utilities, Logger, LockService, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
+  const HtmlService = {
+    createTemplateFromFile: function(name) {
+      return { evaluate: function() { return { setTitle: function() { return this; }, addMetaTag: function() { return this; }, _name: name }; } };
+    },
+    createHtmlOutputFromFile: function(name) {
+      return { getContent: function() { return '<!--' + name + '-->'; } };
+    }
+  };
+  const ContentService = { createTextOutput: function(s) { return { _text: s }; } };
+  const Session = {
+    getActiveUser: function() { return { getEmail: function() { return 'owner@example.com'; } }; },
+    getEffectiveUser: function() { return { getEmail: function() { return 'owner@example.com'; } }; }
+  };
+  const injected = Object.assign({ Utilities: utilities, Logger, LockService, HtmlService, ContentService, Session, SpreadsheetApp: {}, PropertiesService: {} }, extraGlobals || {});
 
   const injectedKeys = Object.keys(injected);
   injectedKeys.forEach(function(k) { global[k] = injected[k]; });
@@ -82,4 +95,16 @@ function loadGs(files, extraGlobals) {
   return result;
 }
 
-module.exports = { loadGs, Utilities };
+// 載入 src/<file>（HtmlService include），取出所有 <script>…</script> 內容，
+// 依序用 vm.runInThisContext 執行，讓 <script> 內對 window.CL 的賦值落在
+// global 上（global.window = global），回傳 global 供測試檔取用。
+function loadHtmlScript(file) {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
+  const scripts = [];
+  html.replace(/<script[^>]*>([\s\S]*?)<\/script>/g, (m, body) => { scripts.push(body); return m; });
+  global.window = global;
+  scripts.forEach((s, i) => vm.runInThisContext(s, { filename: file + '#' + i }));
+  return global;
+}
+
+module.exports = { loadGs, loadHtmlScript, Utilities };

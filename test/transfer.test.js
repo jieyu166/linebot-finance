@@ -146,6 +146,29 @@ t('linkTransfer：寫入 L 欄轉帳ID 與分類「轉帳」', () => {
   assert.strictEqual(rows[1][4], '轉帳');
 });
 
+t('linkTransfer：手動連結會把原分類記進明細描述，避免資訊遺失', () => {
+  const sheet = fakeSheet([
+    ['2026/09/01', '永豐銀行', '永豐大戶', '支出', '薪資', '', '原本備註', 'TWD', 1000, '', 'idA', ''],
+    ['2026/09/01', '玉山銀行', '玉山', '收入', '其他', '', '', 'TWD', 1000, '', 'idB', ''],
+  ]);
+  const ss = fakeSs({ '交易紀錄': sheet });
+  gs.linkTransfer('idA', 'idB', ss);
+  const rows = sheet.getRange(2, 1, 2, 12).getValues();
+  assert.strictEqual(rows[0][4], '轉帳');
+  assert.strictEqual(rows[0][6], '原本備註（原分類：薪資）');
+});
+
+t('linkTransfer：原本就是轉帳分類的列不追加原分類註記', () => {
+  const sheet = fakeSheet([
+    ['2026/09/01', '永豐銀行', '永豐大戶', '支出', '轉帳', '', '備註', 'TWD', 1000, '', 'idA', ''],
+    ['2026/09/01', '玉山銀行', '玉山', '收入', '其他', '', '', 'TWD', 1000, '', 'idB', ''],
+  ]);
+  const ss = fakeSs({ '交易紀錄': sheet });
+  gs.linkTransfer('idA', 'idB', ss);
+  const rows = sheet.getRange(2, 1, 2, 12).getValues();
+  assert.strictEqual(rows[0][6], '備註');
+});
+
 t('linkTransfer：同帳戶拋錯', () => {
   const sheet = fakeSheet([
     txRow('2026/09/01', '永豐銀行', '永豐大戶', '支出', '其他', 1000, 'TWD', 'idA'),

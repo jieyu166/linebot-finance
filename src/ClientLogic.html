@@ -1,0 +1,274 @@
+<script>
+(function () {
+  'use strict';
+
+  var DEFAULT_COLORS = ['#3F7CFF', '#FF7043', '#43A047', '#FFB300', '#8E24AA', '#00ACC1', '#E53935', '#6D4C41'];
+
+  function defaultColor(index) {
+    var n = DEFAULT_COLORS.length;
+    var i = ((index % n) + n) % n;
+    return DEFAULT_COLORS[i];
+  }
+
+  // 信用卡餘額文字：負數（欠款）顯示「未繳」，非負（溢繳）顯示「溢繳」
+  function creditCardLabel(balance, currency) {
+    var n = Number(balance) || 0;
+    if (n < 0) {
+      return '未繳 ' + formatMoney(-n, currency);
+    }
+    return '溢繳 ' + formatMoney(n, currency);
+  }
+
+  function budgetColor(level) {
+    if (level === 'ok') return '#4CAF50';
+    if (level === 'warn') return '#FF9800';
+    if (level === 'over') return '#F44336';
+    return '';
+  }
+
+  // 解析使用者輸入的金額字串（允許千分位逗號），無法解析回傳 NaN。
+  // 負數拒絕（0 除外，0 代表刪除）。
+  function parseAmountInput(raw) {
+    if (raw == null) return NaN;
+    var s = String(raw).trim().replace(/,/g, '');
+    if (s === '') return NaN;
+    if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
+    var n = Number(s);
+    if (Number.isNaN(n)) return NaN;
+    return n;
+  }
+
+  // 將 expr 拆成 tokens：數字（含小數點）與運算子 + - × ÷ * /
+  // 無法辨識的字元、空 token、連續運算子、開頭/結尾為運算子都視為不合法。
+  function tokenize(expr) {
+    var s = String(expr).replace(/\s+/g, '');
+    if (!s) return null;
+    var tokens = [];
+    var i = 0;
+    var expectNumber = true;
+    while (i < s.length) {
+      var ch = s[i];
+      if (/[0-9.]/.test(ch)) {
+        var j = i;
+        while (j < s.length && /[0-9.]/.test(s[j])) j++;
+        var numStr = s.slice(i, j);
+        if (!/^\d*\.?\d*$/.test(numStr) || numStr === '' || numStr === '.') return null;
+        var num = Number(numStr);
+        if (Number.isNaN(num)) return null;
+        tokens.push({ type: 'num', value: num });
+        i = j;
+        expectNumber = false;
+      } else if (ch === '+' || ch === '-' || ch === '×' || ch === '÷' || ch === '*' || ch === '/') {
+        if (expectNumber) return null; // 開頭或連續運算子
+        var op = ch === '×' ? '*' : (ch === '÷' ? '/' : ch);
+        tokens.push({ type: 'op', value: op });
+        i++;
+        expectNumber = true;
+      } else {
+        return null; // 無法辨識字元
+      }
+    }
+    if (expectNumber) return null; // 結尾為運算子
+    return tokens;
+  }
+
+  function evalCalc(expr) {
+    var tokens = tokenize(expr);
+    if (!tokens || tokens.length === 0) return NaN;
+
+    // 第一趟：處理 × ÷
+    var pass1 = [tokens[0]];
+    for (var i = 1; i < tokens.length; i += 2) {
+      var opTok = tokens[i];
+      var numTok = tokens[i + 1];
+      if (!numTok) return NaN;
+      if (opTok.value === '*' || opTok.value === '/') {
+        var prev = pass1.pop();
+        var result;
+        if (opTok.value === '*') {
+          result = prev.value * numTok.value;
+        } else {
+          if (numTok.value === 0) return NaN;
+          result = prev.value / numTok.value;
+        }
+        pass1.push({ type: 'num', value: result });
+      } else {
+        pass1.push(opTok);
+        pass1.push(numTok);
+      }
+    }
+
+    // 第二趟：處理 + -
+    var total = pass1[0].value;
+    for (var k = 1; k < pass1.length; k += 2) {
+      var op2 = pass1[k];
+      var num2 = pass1[k + 1];
+      if (!num2) return NaN;
+      if (op2.value === '+') {
+        total += num2.value;
+      } else if (op2.value === '-') {
+        total -= num2.value;
+      } else {
+        return NaN;
+      }
+    }
+
+    if (Number.isNaN(total)) return NaN;
+    return Math.round(total * 100) / 100;
+  }
+
+  // 計算機鍵盤輸入規則：把下一個按鍵套用到目前的 expr 上。
+  // justCalculated 代表上一步是「=」剛算出結果；此時：
+  //   - 數字/小數點：整個換成新輸入（不是接在結果後面）
+  //   - 運算子：接在結果後面（延續計算）
+  // ⌫ 一律視為正常編輯結果。
+  // 開頭或連續運算子一律視為不合法輸入，直接忽略（回傳不變的 expr）。
+  function applyKey(expr, key, justCalculated) {
+    var e = expr || '';
+    var isDigit = key === '.' || /^[0-9]$/.test(key);
+    var isOp = key === '+' || key === '−' || key === '×' || key === '÷';
+
+    if (key === '⌫') {
+      return { expr: e.slice(0, -1), justCalculated: false };
+    }
+    if (isDigit) {
+      if (justCalculated) {
+        return { expr: key, justCalculated: false };
+      }
+      return { expr: e + key, justCalculated: false };
+    }
+    if (isOp) {
+      if (justCalculated) {
+        return { expr: e + key, justCalculated: false };
+      }
+      if (e === '') {
+        return { expr: e, justCalculated: false }; // 不可開頭就是運算子
+      }
+      var lastChar = e.charAt(e.length - 1);
+      if (lastChar === '+' || lastChar === '−' || lastChar === '×' || lastChar === '÷') {
+        return { expr: e, justCalculated: false }; // 不可連續運算子
+      }
+      return { expr: e + key, justCalculated: false };
+    }
+    return { expr: e, justCalculated: justCalculated };
+  }
+
+  function groupByDate(txs) {
+    var order = [];
+    var map = {};
+    (txs || []).forEach(function (tx) {
+      var date = tx.date;
+      if (!map[date]) {
+        map[date] = { date: date, items: [], expense: 0, income: 0 };
+        order.push(date);
+      }
+      var g = map[date];
+      g.items.push(tx);
+      var amount = Number(tx.amount) || 0;
+      if (tx.type === 'income') {
+        g.income += Math.abs(amount);
+      } else if (tx.type === 'expense') {
+        g.expense += Math.abs(amount);
+      }
+    });
+    return order.map(function (d) { return map[d]; });
+  }
+
+  function formatMoney(n, currency) {
+    var amount = Number(n) || 0;
+    var abs = Math.abs(amount);
+    var hasCents = Math.round(abs * 100) % 100 !== 0;
+    var formatted = (amount < 0 ? '-' : '') + '$' + abs.toLocaleString('en-US', {
+      minimumFractionDigits: hasCents ? 2 : 0,
+      maximumFractionDigits: 2
+    });
+    if (currency && currency !== 'TWD') {
+      formatted += ' ' + currency;
+    }
+    return formatted;
+  }
+
+  function pieSlices(items, cx, cy, r) {
+    var positives = (items || []).filter(function (it) { return Number(it.amount) > 0; });
+    var total = positives.reduce(function (sum, it) { return sum + Number(it.amount); }, 0);
+    if (total <= 0 || positives.length === 0) return [];
+
+    if (positives.length === 1) {
+      var only = positives[0];
+      var d = 'M ' + cx + ' ' + (cy - r) +
+        ' A ' + r + ' ' + r + ' 0 1 1 ' + cx + ' ' + (cy + r) +
+        ' A ' + r + ' ' + r + ' 0 1 1 ' + cx + ' ' + (cy - r) + ' Z';
+      return [{ name: only.name, d: d, color: only.color || defaultColor(0) }];
+    }
+
+    var slices = [];
+    var angle = -Math.PI / 2; // 12 點鐘方向起算，順時針
+    positives.forEach(function (it, index) {
+      var ratio = Number(it.amount) / total;
+      var startAngle = angle;
+      var endAngle = angle + ratio * 2 * Math.PI;
+      var x1 = cx + r * Math.cos(startAngle);
+      var y1 = cy + r * Math.sin(startAngle);
+      var x2 = cx + r * Math.cos(endAngle);
+      var y2 = cy + r * Math.sin(endAngle);
+      var largeArc = ratio > 0.5 ? 1 : 0;
+      var dStr = 'M ' + cx + ' ' + cy +
+        ' L ' + x1 + ' ' + y1 +
+        ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' + x2 + ' ' + y2 + ' Z';
+      slices.push({ name: it.name, d: dStr, color: it.color || defaultColor(index) });
+      angle = endAngle;
+    });
+    return slices;
+  }
+
+  function yearMonthShift(yearMonth, delta) {
+    var parts = String(yearMonth).split('-');
+    var year = Number(parts[0]);
+    var month = Number(parts[1]);
+    var total = year * 12 + (month - 1) + delta;
+    var newYear = Math.floor(total / 12);
+    var newMonth = (total % 12) + 1;
+    return newYear + '-' + String(newMonth).padStart(2, '0');
+  }
+
+  function inferYearMonthLabel(yearMonth) {
+    var parts = String(yearMonth).split('-');
+    return parts[0] + '/' + parts[1];
+  }
+
+  // ratio (0~1) -> 四捨五入整數百分比字串，例如 0.4249 -> '42%'
+  function percent(ratio) {
+    var n = Number(ratio) || 0;
+    return Math.round(n * 100) + '%';
+  }
+
+  // 'yyyy/MM/dd' -> 'yyyy-MM-dd'（供 <input type="date"> 使用）
+  function toIsoDate(s) {
+    if (!s) return '';
+    return String(s).replace(/\//g, '-');
+  }
+
+  // 'yyyy-MM-dd' -> 'yyyy/MM/dd'（<input type="date"> 值轉回後端格式）
+  function fromIsoDate(s) {
+    if (!s) return '';
+    return String(s).replace(/-/g, '/');
+  }
+
+  window.CL = {
+    evalCalc: evalCalc,
+    applyKey: applyKey,
+    groupByDate: groupByDate,
+    formatMoney: formatMoney,
+    creditCardLabel: creditCardLabel,
+    pieSlices: pieSlices,
+    budgetColor: budgetColor,
+    parseAmountInput: parseAmountInput,
+    defaultColor: defaultColor,
+    yearMonthShift: yearMonthShift,
+    inferYearMonthLabel: inferYearMonthLabel,
+    toIsoDate: toIsoDate,
+    fromIsoDate: fromIsoDate,
+    percent: percent
+  };
+})();
+</script>

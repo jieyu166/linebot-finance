@@ -211,3 +211,23 @@ When no digit-run based match is found, `parseCounterpartyBank(text)` MAY be use
 
 - **WHEN** `parseCounterpartyBank('8220000234540289458')` is called
 - **THEN** it returns "中國信託" (bank code "822")
+
+---
+### Requirement: Manual transfer-link candidates from the App (wide window, any category)
+
+The system SHALL provide `pickManualTransferCandidates(tx, allTx, accounts)` for use by the network App's "連結為轉帳" flow, calling `pickTransferCandidates(tx, allTx, accounts, { dayWindow: 7, anyCategory: true })`. Compared to the automatic-pairing search (3-day window, candidates restricted to category "轉帳" or blank), the manual search:
+- Uses a 7-day date window instead of 3 days.
+- Considers candidates of **any category** (`anyCategory: true` bypasses the `o.category !== '轉帳' && o.category !== ''` filter), so a manually-picked counterpart need not itself be categorized as "轉帳".
+- Otherwise applies the same base rules as `pickTransferCandidates`: opposite `type`, different account, no existing `轉帳ID`, and the same date/amount test — same-currency pairs still require the amount to match within 0.005 (now within the 7-day window), while cross-currency pairs are matched only on same-day date proximity plus a `hasFxHint` signal on either side, **without comparing amount**.
+
+`apiTransferCandidates(id, ss)` exposes this to the App: it resolves `id` to a transaction (throwing `Error('找不到這筆交易，可能已被刪除')` if not found) and returns `pickManualTransferCandidates(target, all, accounts)`, including each candidate's `rowIndex` for the app's link-picker sheet.
+
+#### Scenario: Manual search finds a same-currency candidate outside the automatic 3-day window
+
+- **WHEN** a 支出 row on 永豐大戶 (1000 TWD, 2026/09/01) is compared via `pickManualTransferCandidates` against an uncategorized 收入 row on 玉山 (1000 TWD, 2026/09/06, category "其他") — 5 days apart and not categorized "轉帳"
+- **THEN** the 玉山 row is returned (would NOT be returned by the automatic `pickTransferCandidates(tx, allTx, accounts)` default call, which uses a 3-day window and restricts to category "轉帳"/blank)
+
+#### Scenario: Manual cross-currency candidate still requires same-day and an fx hint, not matching amount
+
+- **WHEN** a 支出 row on 永豐大戶 (1000 TWD, 2026/09/01, description "換匯") is compared via `pickManualTransferCandidates` against a 收入 row on 永豐外幣 (30 USD, same date, any category)
+- **THEN** the USD row is returned regardless of its amount relative to 1000; a same-currency-account USD candidate on a different date is not returned even if categorized "轉帳"
