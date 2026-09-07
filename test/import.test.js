@@ -386,6 +386,23 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     assert.strictEqual(row3[5], '全聯');
   });
 
+  t('migrateCreditCardRows：品項含「股票款」的永豐大戶列被排除，不搬到信用卡帳戶', () => {
+    const txSheet = fakeSheet([
+      txRow('2026/04/05', '永豐銀行', '永豐大戶', '支出', '投資', '股票款', '', 9498, 'TWD', 'a', 'PDF匯入'),
+      txRow('2026/04/06', '永豐銀行', '永豐大戶', '支出', '購物', '全聯', '', 850, 'TWD', 'b', 'PDF匯入')
+    ]);
+    const acctSheet = fakeSheet([
+      migAcctRow('永豐大戶', '永豐銀行', '銀行', ''),
+      migAcctRow('永豐信用卡', '永豐銀行', '信用卡', '永豐大戶')
+    ]);
+    const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': acctSheet });
+    const result = gs.migrateCreditCardRows('永豐大戶', '永豐信用卡', '', '', true, ss);
+    assert.strictEqual(result.matched, 1);
+    assert.strictEqual(result.excluded, 1);
+    const row1 = txSheet.getRange(2, 1, 1, 12).getValues()[0];
+    assert.strictEqual(row1[5], '股票款');
+  });
+
   t('migrateCreditCardRows：目標帳戶不存在時拋錯', () => {
     const { ss } = buildMigrateFixture();
     assert.throws(() => gs.migrateCreditCardRows('一銀', '不存在帳戶', '', '', true, ss), /找不到目標帳戶/);
@@ -505,6 +522,61 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
     assert.strictEqual(netflixRow[2], '永豐大戶');
     const cardFeeRow = rows.find(r => r[5] === '卡費入帳');
     assert.strictEqual(cardFeeRow[2], '永豐信用卡');
+  });
+}
+
+// ---- deleteImportedRows ----
+
+{
+  function buildDeleteFixture() {
+    const txSheet = fakeSheet([
+      // row 2: 玉山 in range, PDF匯入, linked transfer with row 5 (現金)
+      txRow('2026/07/05', '玉山銀行', '玉山', '支出', '轉帳', '轉帳至現金', '', 500, 'TWD', 'a', 'PDF匯入'),
+      // row 3: 玉山 in range, 文字匯入, no transferId
+      txRow('2026/07/10', '玉山銀行', '玉山', '支出', '購物', '全聯', '', 300, 'TWD', 'b', '文字匯入'),
+      // row 4: 玉山 in range but手動記帳（source 非匯入來源）
+      txRow('2026/07/15', '玉山銀行', '玉山', '支出', '飲食', '午餐', '', 100, 'TWD', 'c', '午餐100'),
+      // row 5: 現金，是 row2 的轉帳配對對象
+      txRow('2026/07/05', '現金', '現金', '收入', '轉帳', '來自玉山', '', 500, 'TWD', 'd', 'PDF匯入'),
+      // row 6: 玉山 out-of-range
+      txRow('2026/08/01', '玉山銀行', '玉山', '支出', '購物', '全聯', '', 200, 'TWD', 'e', 'PDF匯入')
+    ]);
+    // 手動設定 row2/row5 的轉帳ID（L 欄）
+    txSheet.getRange(2, 12, 1, 1).setValue('T1');
+    txSheet.getRange(5, 12, 1, 1).setValue('T1');
+    const ss = fakeSs({ '交易紀錄': txSheet });
+    return { txSheet, ss };
+  }
+
+  t('deleteImportedRows：帳戶名稱空白時拋錯', () => {
+    assert.throws(() => gs.deleteImportedRows('', '', '', true), /請傳入帳戶名稱/);
+  });
+
+  t('deleteImportedRows：dryRun 預設不刪除，僅比對出符合列', () => {
+    const { txSheet, ss } = buildDeleteFixture();
+    const result = gs.deleteImportedRows('玉山', '2026/07/01', '2026/07/31', true, ss);
+    assert.strictEqual(result.matched, 2);
+    assert.deepStrictEqual(result.rows.sort((a, b) => a - b), [2, 3]);
+    assert.strictEqual(result.deleted, 0);
+    assert.strictEqual(txSheet.getLastRow(), 6);
+  });
+
+  t('deleteImportedRows：dryRun=false 正式刪除，區間內兩筆匯入列被刪除，手動列與區間外列保留，對方轉帳ID被清空', () => {
+    const { txSheet, ss } = buildDeleteFixture();
+    const result = gs.deleteImportedRows('玉山', '2026/07/01', '2026/07/31', false, ss);
+    assert.strictEqual(result.matched, 2);
+    assert.strictEqual(result.deleted, 2);
+
+    const rows = txSheet.getRange(2, 1, txSheet.getLastRow() - 1, 12).getValues();
+    // 剩下：手動午餐列、現金列（轉帳ID 已清空）、玉山區間外列
+    assert.strictEqual(rows.length, 3);
+    const manualRow = rows.find(r => r[10] === 'c');
+    assert.ok(manualRow, '手動記帳列應保留');
+    const cashRow = rows.find(r => r[10] === 'd');
+    assert.ok(cashRow, '對方（現金）列應保留');
+    assert.strictEqual(cashRow[11], '', '對方列轉帳ID應被清空，避免半連結');
+    const outOfRangeRow = rows.find(r => r[10] === 'e');
+    assert.ok(outOfRangeRow, '區間外的玉山列應保留');
   });
 }
 

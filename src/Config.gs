@@ -326,3 +326,98 @@ function runCreditCardPairing() {
   (result.details || []).forEach(function(d) { Logger.log(d); });
   return result;
 }
+
+/** 舊版匯入清理設定：previewDeleteImportedRows()／runDeleteImportedRows() 依此刪除指定帳戶、區間內的匯入錯誤列 */
+var REIMPORT_CLEANUP = { account: '玉山', start: '2026/07/01', end: '2026/07/31' };
+
+/**
+ * 預覽刪除 REIMPORT_CLEANUP 設定範圍內的匯入交易列（不刪除），可直接在編輯器點選執行
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Object} { matched, deleted, rows[] }
+ */
+function previewDeleteImportedRows(ss) {
+  return deleteImportedRows(REIMPORT_CLEANUP.account, REIMPORT_CLEANUP.start, REIMPORT_CLEANUP.end, true, ss);
+}
+
+/**
+ * 正式刪除 REIMPORT_CLEANUP 設定範圍內的匯入交易列，可直接在編輯器點選執行
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Object} { matched, deleted, rows[] }
+ */
+function runDeleteImportedRows(ss) {
+  var result = deleteImportedRows(REIMPORT_CLEANUP.account, REIMPORT_CLEANUP.start, REIMPORT_CLEANUP.end, false, ss);
+  Logger.log('已刪除 ' + result.deleted + ' 筆');
+  return result;
+}
+
+// ===== 一鍵套用初始餘額：改好數字後執行 previewInitialBalances() 再 applyInitialBalances() =====
+var INITIAL_BALANCES = [
+  // 銀行／現金：8/31 實際餘額
+  { name: '現金',       balance: 0,        date: '2026/08/31' },   // 請填實際現金
+  { name: '一銀',       balance: 0,   date: '2026/08/31' },
+  { name: 'LineBank',   balance: 0,    date: '2026/08/31' },
+  { name: '王道',       balance: 0,    date: '2026/08/31' },
+  { name: '永豐大戶',   balance: 0,   date: '2026/08/31' },
+  { name: '永豐證券',   balance: 0,    date: '2026/08/31' },
+  { name: '永豐外幣',   balance: 0,  date: '2026/08/31' },
+  { name: '玉山',       balance: 0,    date: '2026/08/31' },
+  { name: '台新',       balance: 0,   date: '2026/08/31' },
+  { name: '中信',       balance: 0,    date: '2026/08/31' },
+  { name: '富邦',       balance: 0,    date: '2026/08/31' },
+  { name: '國泰',       balance: 0,        date: '2026/08/31' },   // 追蹤表為 -0，請確認是否為信用卡未繳
+  { name: '樂天',       balance: 0,    date: '2026/08/31' },
+  // 信用卡：最近一期「本期應繳總額」的負數，日期填該期結帳日
+  { name: '永豐信用卡',     balance: -0,  date: '2026/08/16' },
+  { name: '永豐信用卡外幣', balance: -0, date: '2026/08/16' },
+  { name: '一銀信用卡',     balance: -0,   date: '2026/08/05' },
+  { name: '玉山信用卡',     balance: -0,  date: '2026/08/13' },
+  { name: '台新信用卡',     balance: 0,       date: '2026/08/31' },   // 請依最近帳單填
+  { name: '中信信用卡',     balance: 0,       date: '2026/08/31' },
+  { name: '富邦信用卡',     balance: 0,       date: '2026/08/31' },
+  { name: '國泰信用卡',     balance: 0,       date: '2026/08/31' }
+];
+
+/**
+ * 預覽 INITIAL_BALANCES 套用結果（不寫入），可直接在編輯器點選執行
+ * @param {Array<Object>} [list] - 可選的清單（供測試注入，預設 INITIAL_BALANCES）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Object} { applied: number, skipped: number }
+ */
+function previewInitialBalances(list, ss) {
+  list = list || INITIAL_BALANCES;
+  var accounts = getAccounts(ss);
+  var skipped = 0;
+  list.forEach(function(item) {
+    var account = findAccountByName(accounts, item.name);
+    if (!account) {
+      Logger.log('【' + item.name + '】找不到帳戶，略過');
+      skipped++;
+      return;
+    }
+    Logger.log('【' + item.name + '】現在 ' + account.initialBalance + ' (' + (account.initialDate || '無') + ') → 將改為 ' + item.balance + ' (' + item.date + ')');
+  });
+  return { applied: 0, skipped: skipped };
+}
+
+/**
+ * 正式套用 INITIAL_BALANCES 到「帳戶管理」的初始餘額／初始日期，可直接在編輯器點選執行
+ * @param {Array<Object>} [list] - 可選的清單（供測試注入，預設 INITIAL_BALANCES）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {Object} { applied: number, skipped: number }
+ */
+function applyInitialBalances(list, ss) {
+  list = list || INITIAL_BALANCES;
+  var applied = 0;
+  var skipped = 0;
+  list.forEach(function(item) {
+    try {
+      updateAccountSettings(item.name, { initialBalance: item.balance, initialDate: item.date }, ss);
+      Logger.log('【' + item.name + '】已改為 ' + item.balance + ' (' + item.date + ')');
+      applied++;
+    } catch (e) {
+      Logger.log('【' + item.name + '】找不到帳戶，略過');
+      skipped++;
+    }
+  });
+  return { applied: applied, skipped: skipped };
+}

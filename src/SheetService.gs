@@ -753,3 +753,26 @@ function printBalanceAudit() {
   });
   return audits;
 }
+
+/**
+ * 更新「帳戶管理」單一帳戶的初始餘額／初始日期／帳戶類型（只更新有提供的欄位）
+ * @param {string} name - 帳戶名稱（依 normalizeName 比對）
+ * @param {Object} params - { initialBalance, initialDate, type }（皆可選）
+ * @param {Spreadsheet} [ss] - 可選的試算表物件（供測試注入）
+ * @returns {number} 更新的列號（rowIndex）
+ */
+function updateAccountSettings(name, params, ss) {
+  ss = getSpreadsheet(ss);
+  var sheet = ss.getSheetByName('帳戶管理');
+  var values = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), 1).getValues();
+  var rowIndex = 0;
+  values.forEach(function(row, i) { if (normalizeName(row[0]) === normalizeName(name)) { rowIndex = i + 2; } });
+  if (!rowIndex) { throw new Error('找不到帳戶「' + name + '」'); }
+  var lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    if (params.initialBalance !== undefined) { sheet.getRange(rowIndex, 4, 1, 1).setValue(parseAmount(params.initialBalance)); }
+    if (params.initialDate !== undefined) { sheet.getRange(rowIndex, 5, 1, 1).setValue(params.initialDate); }
+    if (params.type !== undefined && params.type !== '') { sheet.getRange(rowIndex, 8, 1, 1).setValue(params.type); }
+    return rowIndex;
+  } finally { lock.releaseLock(); }
+}

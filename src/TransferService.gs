@@ -398,8 +398,8 @@ function dedupeAgainstSheet(transactions, ss) {
 /** 舊資料搬移預設排除分類：這些分類本身就不該搬到信用卡帳戶（轉帳／利息／薪資收入等） */
 var MIGRATION_DEFAULT_EXCLUDE_CATEGORIES = ['繳信用卡', '轉帳', '利息', '回饋', '薪資', '股利', '貸款', '投資', '投資獲利', '兼職', '獎金', '家人給'];
 
-/** 舊資料搬移預設排除的品項/描述關鍵字（連結帳戶轉入轉出、卡費繳款、換匯等非信用卡消費列） */
-var MIGRATION_DEFAULT_EXCLUDE_ITEM_PATTERN = /連結帳戶|利息|回饋|轉帳|換匯|卡費|還本|存入|薪資|股息|ACH|定期買股|交割|提款|現金提/;
+/** 舊資料搬移預設排除的品項/描述關鍵字（連結帳戶轉入轉出、卡費繳款、換匯、證券款項等非信用卡消費列） */
+var MIGRATION_DEFAULT_EXCLUDE_ITEM_PATTERN = /連結帳戶|利息|回饋|轉帳|換匯|卡費|還本|存入|薪資|股息|ACH|定期買股|交割|提款|現金提|股票款|申購|折讓|股利|退還/;
 
 /**
  * 將舊資料中誤記在扣款帳戶下的信用卡消費列搬移到信用卡帳戶。
@@ -463,6 +463,58 @@ function pairExistingCreditCardPayments(dryRun, ss) {
   Logger.log('未配對的繳信用卡列：' + targets.length + ' 筆');
   if (dryRun) { return { paired: 0, created: 0, details: targets.map(function(t) { return t.date + ' ' + t.account + ' ' + t.amount; }) }; }
   return autoPairImportedTransactions(targets, ss);
+}
+
+/**
+ * 刪除指定帳戶、日期區間內由匯入產生的交易列（原始訊息為 PDF匯入／文字匯入／自動配對）。
+ * 用於清掉舊版匯入邏輯寫壞的錯誤列，之後可重新貼帳單匯入；手動記帳列與區間外的列不受影響。
+ * 正式執行前，若目標列已與其他帳戶配對轉帳（轉帳ID 非空），會先清空對方列的轉帳ID，避免
+ * 對方半連結；接著依列號由高到低刪除，避免刪除過程中列號位移影響尚未處理的列。
+ * @param {string} accountName - 帳戶名稱（正規化後比對）
+ * @param {string} [startDate] - 起始日期（含），未填不限制
+ * @param {string} [endDate] - 結束日期（含），未填不限制
+ * @param {boolean} [dryRun] - 預設 true，只記錄不刪除；傳 false 才正式刪除
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {Object} { matched, deleted, rows[] }
+ */
+function deleteImportedRows(accountName, startDate, endDate, dryRun, ss) {
+  if (!accountName) { throw new Error('請傳入帳戶名稱'); }
+  dryRun = dryRun !== false;
+  ss = getSpreadsheet(ss);
+  var sheet = ss.getSheetByName('交易紀錄');
+  var rows = getTransactionRows(ss);
+  var start = startDate ? parseSheetDate(startDate) : null, end = endDate ? parseSheetDate(endDate) : null;
+  var result = { matched: 0, deleted: 0, rows: [] };
+  var targets = [];
+  for (var i = 0; i < rows.length; i++) {
+    var tx = rowToTransaction(rows[i], i + 2);
+    if (normalizeName(tx.account) !== normalizeName(accountName)) { continue; }
+    if (!IMPORT_SOURCES[tx.source]) { continue; }
+    var d = parseSheetDate(tx.date);
+    if ((start && (!d || d < start)) || (end && (!d || d > end))) { continue; }
+    result.matched++;
+    targets.push(tx);
+    result.rows.push(tx.rowIndex);
+    Logger.log('[預覽] 第 ' + tx.rowIndex + ' 列 ' + tx.date + ' ' + tx.item + ' ' + tx.amount);
+  }
+  Logger.log('符合 ' + result.matched + ' 筆' + (dryRun ? '（預覽，未刪除；正式執行傳 dryRun=false）' : ''));
+  if (dryRun) { return result; }
+
+  targets.forEach(function(t) {
+    if (!t.transferId) { return; }
+    for (var j = 0; j < rows.length; j++) {
+      var rowIndex = j + 2;
+      if (rowIndex === t.rowIndex) { continue; }
+      if (String(rows[j][11] || '').trim() === t.transferId) {
+        sheet.getRange(rowIndex, 12, 1, 1).setValue('');
+      }
+    }
+  });
+
+  targets.sort(function(a, b) { return b.rowIndex - a.rowIndex; });
+  targets.forEach(function(t) { sheet.deleteRow(t.rowIndex); result.deleted++; });
+  Logger.log('已刪除 ' + result.deleted + ' 筆');
+  return result;
 }
 
 function createTransfer(params, ss) {
