@@ -284,50 +284,58 @@ function apiSaveCategory(params, ss) {
     var sheetName = params.type === '支出' ? '支出分類' : '收入分類';
     var oldName = String(params.oldName || '').trim();
     var name = String(params.name || '').trim();
-    var renameResult = null;
     if (oldName !== '' && oldName !== name) {
-      // 先改交易／預算的分類名稱，此時分類表仍是 oldName，不會被 apiRenameCategory
-      // 的重複檢查誤判成「newName 已存在」；分類表本身的改名交給下面的 upsertCategory。
-      renameResult = apiRenameCategory(params.type, oldName, name, ss);
-    }
-    var result = upsertCategory(sheetName, params, ss);
-    if (renameResult) {
+      // 先透過 apiRenameCategory 做「唯一一次」原子改名（本身自帶鎖）：
+      // 交易／預算改名，以及分類表本身該列的 A 欄改名，皆在同一把鎖內完成。
+      var renameResult = apiRenameCategory(params.type, oldName, name, ss);
+      // 分類表該列已改名為 name，這裡不再傳 oldName，只用來更新 icon/color，
+      // 不會誤判成「重複」（目標列就是剛剛被改名的那一列）。
+      var upsertParams = { name: params.name, icon: params.icon, color: params.color };
+      var result = upsertCategory(sheetName, upsertParams, ss);
       result.changedTransactions = renameResult.changedTransactions;
       result.changedBudgets = renameResult.changedBudgets;
+      return result;
     }
-    return result;
+    return upsertCategory(sheetName, params, ss);
   } catch (e) {
     throw new Error(e && e.message ? e.message : String(e));
   }
 }
 
 /**
- * 將指定類型的分類名稱改名，同步更新交易紀錄 E 欄與預算表（kind='分類'）的 B 欄
- * @param {string} type - '支出' 或 '收入'（交易紀錄 D 欄）
+ * 將指定類型的分類名稱原子性改名：同步更新交易紀錄 E 欄、預算表（kind='分類'）B 欄，
+ * 以及分類表本身該列的 A 欄。全程（讀＋寫）都在同一把 LockService 鎖內完成，避免
+ * TOCTOU（鎖外讀到的資料在鎖內寫入前被其他呼叫改動）。
+ * @param {string} type - '支出' 或 '收入'（交易紀錄 D 欄／分類表）
  * @param {string} oldName - 舊分類名稱
  * @param {string} newName - 新分類名稱
  * @param {Spreadsheet} [ss] - 可選的試算表物件
- * @returns {Object} { changedTransactions, changedBudgets }
+ * @returns {Object} { changedTransactions, changedBudgets, categoryRow }
  */
 function apiRenameCategory(type, oldName, newName, ss) {
+  ss = getSpreadsheet(ss);
+  var trimmedOldName = String(oldName || '').trim();
+  var trimmedNewName = String(newName || '').trim();
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
   try {
-    ss = getSpreadsheet(ss);
-    var trimmedOldName = String(oldName || '').trim();
-    var trimmedNewName = String(newName || '').trim();
     if (trimmedNewName === '') { throw new Error('分類名稱不可空白'); }
     if (normalizeName(trimmedOldName) === normalizeName(trimmedNewName)) {
-      return { changedTransactions: 0, changedBudgets: 0 };
+      return { changedTransactions: 0, changedBudgets: 0, categoryRow: null };
     }
 
-    // 重複檢查：只有當「舊名」與「新名」同時存在於分類表時才視為衝突——
-    // apiSaveCategory 會先呼叫本函式再改分類表本身，此時分類表仍是 oldName，
-    // 不會誤判；若呼叫端直接把 newName 傳成一個「已存在且與 oldName 不同」的
-    // 分類，才會在這裡擋下來。
     var categorySheetName = type === '支出' ? '支出分類' : '收入分類';
+    var categorySheet = ss.getSheetByName(categorySheetName);
     var categoryRows = getCategoryRows(categorySheetName, ss);
-    var hasOldName = categoryRows.some(function(r) { return normalizeName(r.name) === normalizeName(trimmedOldName); });
-    var hasNewName = categoryRows.some(function(r) { return normalizeName(r.name) === normalizeName(trimmedNewName); });
-    if (hasOldName && hasNewName) { throw new Error('分類「' + trimmedNewName + '」已存在'); }
+    var oldRow = null;
+    var hasNewName = false;
+    categoryRows.forEach(function(r) {
+      if (normalizeName(r.name) === normalizeName(trimmedOldName)) { oldRow = r; }
+      if (normalizeName(r.name) === normalizeName(trimmedNewName)) { hasNewName = true; }
+    });
+    if (hasNewName) { throw new Error('分類「' + trimmedNewName + '」已存在'); }
+    if (!oldRow) { throw new Error('找不到分類「' + trimmedOldName + '」'); }
 
     var sheet = ss.getSheetByName('交易紀錄');
     var rows = getTransactionRows(ss);
@@ -338,19 +346,22 @@ function apiRenameCategory(type, oldName, newName, ss) {
       return b.kind === '分類' && b.name === trimmedOldName;
     });
 
-    var lock = LockService.getScriptLock(); lock.waitLock(10000);
-    try {
-      replaced.changedRowIndexes.forEach(function(rowIndex) {
-        sheet.getRange(rowIndex, 5, 1, 1).setValue(trimmedNewName);
-      });
-      budgetsToChange.forEach(function(b) {
-        budgetSheet.getRange(b.rowIndex, 2, 1, 1).setValue(trimmedNewName);
-      });
-      return { changedTransactions: replaced.changedRowIndexes.length, changedBudgets: budgetsToChange.length };
-    } finally {
-      lock.releaseLock();
-    }
+    replaced.changedRowIndexes.forEach(function(rowIndex) {
+      sheet.getRange(rowIndex, 5, 1, 1).setValue(trimmedNewName);
+    });
+    budgetsToChange.forEach(function(b) {
+      budgetSheet.getRange(b.rowIndex, 2, 1, 1).setValue(trimmedNewName);
+    });
+    categorySheet.getRange(oldRow.rowIndex, 1, 1, 1).setValue(trimmedNewName);
+
+    return {
+      changedTransactions: replaced.changedRowIndexes.length,
+      changedBudgets: budgetsToChange.length,
+      categoryRow: oldRow.rowIndex
+    };
   } catch (e) {
     throw new Error(e && e.message ? e.message : String(e));
+  } finally {
+    lock.releaseLock();
   }
 }

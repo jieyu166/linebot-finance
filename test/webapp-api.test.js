@@ -254,12 +254,64 @@ t('apiRenameCategory 改交易與預算並回傳筆數', () => {
   const budSheet = budgetSheet([['分類', '飲食', 8000], ['帳戶', '飲食', 100]]);
   const ss = baseSs({ '交易紀錄': txSheet, '預算': budSheet });
   const out = gs.apiRenameCategory('支出', '飲食', '餐飲', ss);
-  assert.deepStrictEqual(out, { changedTransactions: 2, changedBudgets: 1 });
+  assert.deepStrictEqual(out, { changedTransactions: 2, changedBudgets: 1, categoryRow: 2 });
   assert.strictEqual(txSheet._data[1][4], '餐飲');
   assert.strictEqual(txSheet._data[2][4], '餐飲');
   assert.strictEqual(txSheet._data[3][4], '飲食');
   assert.strictEqual(budSheet._data[1][1], '餐飲');
   assert.strictEqual(budSheet._data[2][1], '飲食'); // 帳戶類不改
+});
+
+t('apiRenameCategory 直接改分類表 A 欄（不經 upsertCategory）', () => {
+  const catSheet = categorySheet([['飲食', '🍜', '#F5A623']]);
+  const ss = baseSs({ '支出分類': catSheet });
+  const out = gs.apiRenameCategory('支出', '飲食', '餐飲', ss);
+  assert.strictEqual(out.categoryRow, 2);
+  assert.strictEqual(catSheet._data[1][0], '餐飲');
+  assert.strictEqual(catSheet._data[1][1], '🍜'); // icon/color 不動
+});
+
+t('apiRenameCategory 找不到 oldName 時拋「找不到分類」', () => {
+  const ss = baseSs();
+  assert.throws(() => gs.apiRenameCategory('支出', '不存在的分類', '餐飲', ss), /找不到分類「不存在的分類」/);
+});
+
+t('apiRenameCategory 先取鎖才讀寫，順序為 lock → read... → write... → unlock', () => {
+  const events = [];
+  const txSheet = fakeSheet([
+    ['2026/09/01', '現金', '現金', '支出', '飲食', '午餐', '', 'TWD', 80, 'App', 'i1', '']
+  ]);
+  const catSheet = categorySheet([['飲食', '🍜', '#F5A623']]);
+  const budSheet = budgetSheet([['分類', '飲食', 8000]]);
+  [txSheet, catSheet, budSheet].forEach((sheet) => {
+    const originalGetRange = sheet.getRange;
+    sheet.getRange = function() {
+      const range = originalGetRange.apply(sheet, arguments);
+      const originalGetValues = range.getValues;
+      const originalSetValue = range.setValue;
+      range.getValues = function() { events.push('read'); return originalGetValues.apply(range, arguments); };
+      range.setValue = function() { events.push('write'); return originalSetValue.apply(range, arguments); };
+      return range;
+    };
+  });
+  const ss = baseSs({ '交易紀錄': txSheet, '支出分類': catSheet, '預算': budSheet });
+  const gsWithLock = loadGs(WEBAPP_FILES, {
+    LockService: {
+      getScriptLock: () => ({
+        waitLock: () => { events.push('lock'); },
+        releaseLock: () => { events.push('unlock'); },
+        tryLock: () => true
+      })
+    }
+  });
+  gsWithLock.apiRenameCategory('支出', '飲食', '餐飲', ss);
+  assert.strictEqual(events[0], 'lock');
+  assert.strictEqual(events[events.length - 1], 'unlock');
+  const firstReadIndex = events.indexOf('read');
+  const firstWriteIndex = events.indexOf('write');
+  assert.ok(firstReadIndex > 0, '應該有讀取事件');
+  assert.ok(firstWriteIndex > firstReadIndex, '寫入應該在讀取之後');
+  assert.ok(events.slice(1, firstWriteIndex).every((e) => e === 'read'), '鎖後、寫入前只應該有讀取事件');
 });
 
 t('apiRenameCategory 用 LockService 包住讀寫，正常結束時 waitLock/releaseLock 各呼叫一次', () => {
@@ -280,7 +332,7 @@ t('apiRenameCategory 用 LockService 包住讀寫，正常結束時 waitLock/rel
     }
   });
   const out = gsWithLock.apiRenameCategory('支出', '飲食', '餐飲', ss);
-  assert.deepStrictEqual(out, { changedTransactions: 1, changedBudgets: 1 });
+  assert.deepStrictEqual(out, { changedTransactions: 1, changedBudgets: 1, categoryRow: 2 });
   assert.strictEqual(waitLockCalls, 1);
   assert.strictEqual(releaseLockCalls, 1);
 });
@@ -325,7 +377,7 @@ t('apiRenameCategory oldName 等於 newName 時為 no-op', () => {
   ]);
   const ss = baseSs({ '交易紀錄': txSheet });
   const out = gs.apiRenameCategory('支出', '飲食', '飲食', ss);
-  assert.deepStrictEqual(out, { changedTransactions: 0, changedBudgets: 0 });
+  assert.deepStrictEqual(out, { changedTransactions: 0, changedBudgets: 0, categoryRow: null });
   assert.strictEqual(txSheet._data[1][4], '飲食'); // 未被改動
 });
 
