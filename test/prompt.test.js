@@ -96,6 +96,12 @@ t('buildPdfSystemPrompt 含 balance/counterparty/statementTotals schema 與新�
   assert.ok(p.indexOf('Richart') >= 0 && p.indexOf('台新') >= 0, '缺 Richart→台新提示');
 });
 
+t('buildPdfSystemPrompt 含玉山/台新無獨立證券帳戶時的證券交割規則說明', () => {
+  const p = gs.buildPdfSystemPrompt(EXP, INC, accounts());
+  assert.ok(p.indexOf('沒有獨立證券帳戶') >= 0, '缺無獨立證券帳戶說明');
+  assert.ok(p.indexOf('證券交割') >= 0 && p.indexOf('股款') >= 0, '缺證券交割／股款列規則');
+});
+
 // ---------- stripGarbledLines ----------
 
 t('stripGarbledLines 去掉亂碼行、保留正常行與空行', () => {
@@ -237,6 +243,35 @@ t('resolveImportedAccounts 證券帳單強制對應證券帳戶', () => {
   const parsed = {
     bank: '永豐銀行', statementType: '證券',
     transactions: [tx({ account: '永豐大戶', item: '台積電', category: '投資' })]
+  };
+  const r = gs.resolveImportedAccounts(parsed, accounts());
+  assert.strictEqual(r.transactions[0].account, '永豐證券');
+});
+
+t('resolveImportedAccounts 證券帳單：該銀行沒有獨立證券帳戶時 fallback 到同銀行的銀行帳戶（玉山）', () => {
+  const parsed = {
+    bank: '玉山銀行', statementType: '證券',
+    transactions: [tx({ account: '', item: '台積電', category: '投資' })]
+  };
+  const r = gs.resolveImportedAccounts(parsed, accounts());
+  assert.strictEqual(r.transactions[0].account, '玉山');
+});
+
+t('resolveImportedAccounts 證券帳單：該銀行沒有獨立證券帳戶時 fallback 到同銀行的銀行帳戶（台新）', () => {
+  const parsed = {
+    bank: '台新銀行', statementType: '證券',
+    transactions: [tx({ account: '', item: '台積電', category: '投資' })]
+  };
+  const r = gs.resolveImportedAccounts(parsed, [
+    { name: '台新', institution: '台新銀行', currency: 'TWD', type: '銀行', accountNumberHints: [] }
+  ].concat(accounts()));
+  assert.strictEqual(r.transactions[0].account, '台新');
+});
+
+t('resolveImportedAccounts 證券帳單：永豐仍優先對應獨立證券帳戶，不 fallback 到銀行帳戶', () => {
+  const parsed = {
+    bank: '永豐銀行', statementType: '證券',
+    transactions: [tx({ account: '', item: '台積電', category: '投資' })]
   };
   const r = gs.resolveImportedAccounts(parsed, accounts());
   assert.strictEqual(r.transactions[0].account, '永豐證券');

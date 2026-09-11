@@ -185,6 +185,7 @@ function buildPdfSystemPrompt(expenseCategories, incomeCategories, accounts) {
     + '   - 現買/普買/買進 → type:支出, category:投資, amount 用「客戶應付」或「應收付(-)金額」的絕對值。\n'
     + '   - 現賣/普賣/賣出 → type:收入, category:投資獲利, amount 用「客戶應收」或正數金額。\n'
     + '   - 復委託：應收/付(-)金額為負數=買進(支出)，正數=賣出(收入)。\n'
+    + '   - 若該銀行沒有獨立證券帳戶（如玉山、台新），account 填該銀行的銀行帳戶名稱；bank 明細中的「證券交割」「股款」列記 支出／投資（買）或 收入／投資獲利（賣），description 保留原文。\n'
     + '6. 貸款相關：貸款利息、償還本金、還本、本金攤還、放款繳款 → type:支出, category:貸款。網銀明細中的「還本」不可歸為轉帳。\n'
     + '7. 轉帳相關：跨行轉帳、網路轉帳、轉帳支取、跨行轉 → type:支出, category:轉帳；但若描述含「還本」或其他貸款本金償還語意，優先歸「貸款」。\n'
     + '   轉帳存入、跨行轉入、CD轉收 → type:收入, category:轉帳（收入分類中歸「其他」）。\n'
@@ -341,7 +342,9 @@ function resolveImportedAccounts(parsed, accounts) {
           acct = findAccountByTypeAndBank(accounts, '信用卡', parsed.bank || tx.institution, currency) || acct;
         }
       } else if (st === '證券' && (!acct || acct.type !== '證券')) {
-        acct = findAccountByTypeAndBank(accounts, '證券', parsed.bank || tx.institution, currency) || acct;
+        acct = findAccountByTypeAndBank(accounts, '證券', parsed.bank || tx.institution, currency)
+          || findAccountByTypeAndBank(accounts, '銀行', parsed.bank || tx.institution, currency)
+          || acct;
       }
     }
     if (acct) {

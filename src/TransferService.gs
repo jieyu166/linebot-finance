@@ -348,7 +348,7 @@ var IMPORT_SOURCES = { 'PDF匯入': true, '文字匯入': true, '自動配對': 
 /**
  * 證券概括品項（尚未寫入具體股名）的判斷樣式
  */
-var GENERIC_STOCK_ITEMS = /定期買股|交割|證券|股票/;
+var GENERIC_STOCK_ITEMS = /定期買股|交割|證券|股票|股款|申購/;
 
 /**
  * 判斷交易是否與既有匯入交易重複

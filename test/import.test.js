@@ -108,6 +108,41 @@ t('dedupeAgainstSheet：同批內兩筆相同新交易匹配同一既有列，�
   assert.strictEqual(row[0], '台積電');
 });
 
+t('dedupeAgainstSheet：玉山（銀行類型帳戶）銀行明細「證券交割」先到，證券對帳單「台積電」後到 → 改寫既有列、合併 1 筆', () => {
+  const sheet = fakeSheet([
+    txRow('2026/09/01', '玉山銀行', '玉山', '支出', '投資', '證券交割', '', 9498, 'TWD', 'e1', 'PDF匯入')
+  ]);
+  const ss = fakeSs({ '交易紀錄': sheet });
+
+  const incoming = [
+    tx({ date: '2026/09/02', account: '玉山', category: '投資', item: '台積電', description: '普買 台積電 4股', amount: 9498 })
+  ];
+  const result = gs.dedupeAgainstSheet(incoming, ss);
+  assert.strictEqual(result.kept.length, 0);
+  assert.strictEqual(result.skipped.length, 1);
+  assert.strictEqual(result.merged, 1);
+  const row = sheet.getRange(2, 6, 1, 2).getValues()[0];
+  assert.strictEqual(row[0], '台積電');
+  assert.strictEqual(row[1], '普買 台積電 4股');
+});
+
+t('dedupeAgainstSheet：玉山（銀行類型帳戶）證券對帳單「台積電」先到，銀行明細「證券交割」後到 → 銀行列被跳過為重複，不改寫', () => {
+  const sheet = fakeSheet([
+    txRow('2026/09/01', '玉山銀行', '玉山', '支出', '投資', '台積電', '普買 台積電 4股', 9498, 'TWD', 'e1', 'PDF匯入')
+  ]);
+  const ss = fakeSs({ '交易紀錄': sheet });
+
+  const incoming = [
+    tx({ date: '2026/09/02', account: '玉山', category: '投資', item: '證券交割', description: '', amount: 9498 })
+  ];
+  const result = gs.dedupeAgainstSheet(incoming, ss);
+  assert.strictEqual(result.kept.length, 0);
+  assert.strictEqual(result.skipped.length, 1);
+  assert.strictEqual(result.merged, 0);
+  const row = sheet.getRange(2, 6, 1, 2).getValues()[0];
+  assert.strictEqual(row[0], '台積電');
+});
+
 // ---- buildImportSummary / importTransactions（共用同一次三檔 loadGs，避免同一檔案清單重複呼叫） ----
 
 {

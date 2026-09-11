@@ -536,5 +536,20 @@ t('autoPairImportedTransactions：全表只讀一次（兩張卡各一筆繳信�
   assert.strictEqual(bulkReads, 1, '全表讀取（nr>1）應只發生一次，實際 ' + bulkReads + ' 次');
 });
 
+t('autoPairImportedTransactions：玉山（銀行類型帳戶）支出/投資「證券交割」列不觸發交割戶自動配對（不是轉帳，是交割本身）', () => {
+  const acctRows = [
+    accountRowFull('玉山', '玉山銀行', 'TWD', '銀行', '', '0015977'),
+    accountRowFull('永豐證券', '永豐銀行', 'TWD', '證券', '永豐大戶', '042-01')
+  ];
+  const txSheet = fakeSheet([
+    txRowFull('2026/09/01', '玉山銀行', '玉山', '支出', '投資', '證券交割', '', 9498, 'TWD', 't1')
+  ]);
+  const ss = fakeSs({ '交易紀錄': txSheet, '帳戶管理': acctSheet(acctRows) });
+
+  const result = gs.autoPairImportedTransactions([{ id: 't1' }], ss);
+  assert.strictEqual(result.paired, 0);
+  assert.strictEqual(result.created, 0);
+});
+
 console.log(failed ? `\n${failed} 個測試失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);

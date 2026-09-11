@@ -376,6 +376,17 @@ t('dropSettlementBuyRows：即使 LLM 把該列分類誤標成非「投資」（
   assert.strictEqual(parsed.transactions.length, 0);
 });
 
+t('dropSettlementBuyRows：玉山（銀行類型，非證券帳戶）的「證券交割」概括列不丟棄，交由 dedupeAgainstSheet 處理', () => {
+  const parsed = {
+    notes: [],
+    transactions: [tx({ account: '玉山', type: '支出', category: '投資', item: '證券交割', amount: 9498 })]
+  };
+  gs.dropSettlementBuyRows(parsed, accounts());
+  assert.strictEqual(parsed.transactions.length, 1);
+  assert.strictEqual(parsed.transactions[0].item, '證券交割');
+  assert.deepStrictEqual(parsed.notes, []);
+});
+
 // ---------- resolveImportedAccounts：證券帳號忽略 accountNumber ----------
 
 t('resolveImportedAccounts：證券帳單忽略 accountNumber，一律以類型/機構解析且不記未對應', () => {
