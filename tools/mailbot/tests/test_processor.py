@@ -67,7 +67,7 @@ def test_done_posts_once_per_pdf_and_labels_done(posts, tmp_path):
 def test_query_excludes_labels_and_uses_lookback(posts, tmp_path):
     client = one_msg_client()
     run(client, tmp_path)
-    assert client.queries == ["newer_than:30d has:attachment filename:pdf -label:已記帳 -label:記帳失敗"]
+    assert client.queries == ["newer_than:30d has:attachment filename:pdf -label:\"已記帳\" -label:\"記帳失敗\""]
     assert set(client.ensured) == {"已記帳", "記帳失敗"}
 
 
@@ -125,3 +125,12 @@ def test_log_line_has_subject_status_but_no_text_or_password(posts, tmp_path):
     log = (tmp_path / f"{dt.date.today():%Y-%m-%d}.log").read_text(encoding="utf-8")
     assert "永豐銀行 綜合對帳單" in log and "done" in log
     assert "SECRETTEXT" not in log and "pw123" not in log and "tok" not in log.split("\t")
+
+
+def test_build_query_quotes_label_names():
+    class S:
+        LOOKBACK_DAYS = 7
+        LABEL_DONE = 'My "Done" label'
+        LABEL_FAIL = "記帳 失敗"
+    q = processor.build_query(S())
+    assert '-label:"My Done label"' in q and '-label:"記帳 失敗"' in q

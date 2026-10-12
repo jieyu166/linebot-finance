@@ -1,7 +1,10 @@
 const assert = require('assert');
 const { loadGs } = require('./harness');
 
-const gs = loadGs(['SheetService.gs', 'Config.gs', 'TransferService.gs', 'WebAppLogic.gs', 'OpenAIService.gs', 'Main.gs', 'WebApp.gs']);
+const fetchCalls = [];
+const gs = loadGs(['SheetService.gs', 'Config.gs', 'TransferService.gs', 'WebAppLogic.gs', 'OpenAIService.gs', 'LineService.gs', 'Main.gs', 'WebApp.gs'], {
+  UrlFetchApp: { fetch: function(url, o) { fetchCalls.push(url); return { getResponseCode: function() { return 200; }, getContentText: function() { return ''; } }; } }
+});
 gs.PropertiesService.getScriptProperties().setProperty('WEBAPP_TOKEN', 'tok');
 global.Session = { getActiveUser: () => ({ getEmail: () => '' }), getEffectiveUser: () => ({ getEmail: () => 'owner@example.com' }) };
 global.ContentService = {
@@ -23,10 +26,24 @@ function tx(o) { return Object.assign({ date: '2026/10/01', type: '支出', cate
 function post(obj) { return JSON.parse(gs.handleImportPost({ postData: { contents: typeof obj === 'string' ? obj : JSON.stringify(obj) } }).getContent()); }
 
 t('缺 token / 錯 token → 無權限', () => {
-  assert.strictEqual(post({ text: 'a' }).error, '無權限使用此 App');
+  assert.strictEqual(post({ text: 'a' }).error, '無權限');
   const r = post({ token: 'bad', text: 'a' });
   assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.error, '無權限使用此 App');
+  assert.strictEqual(r.error, '無權限');
+});
+
+t('錯 token / 壞 JSON 不 push；好 token push 一次', () => {
+  const props = gs.PropertiesService.getScriptProperties();
+  props.setProperty('LINE_USER_ID', 'Uabc');
+  props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', 'x');
+  try {
+    fetchCalls.length = 0;
+    post({ token: 'bad', text: 'a' });
+    post('not json');
+    assert.strictEqual(fetchCalls.length, 0);
+    post({ token: 'tok', text: '  ' });
+    assert.strictEqual(fetchCalls.length, 1);
+  } finally { props.setProperty('LINE_USER_ID', ''); }
 });
 
 t('非 JSON body → ok:false', () => {

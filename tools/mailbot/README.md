@@ -76,6 +76,9 @@ powershell -ExecutionPolicy Bypass -File tools\mailbot\install_task.ps1
 
 - 看 Gmail 標籤「已記帳」／「記帳失敗」，以及 LINE 收到的 push 摘要。
 - 要重跑失敗的信：先在 Gmail 移除「記帳失敗」標籤。`skip`（無對應規則或無 PDF）不加標籤。
+- 一封信含多個 PDF 且部分失敗時，整封信會標「記帳失敗」，不會自動重試；要重試請移除該標籤，已寫入的內容由試算表端的去重機制擋下，不會重複記帳。
+- `--message-id <ID>` 會無視標籤直接重跑該信。
+- 結束碼：0 = 全部成功、1 = 有失敗、2 = 設定缺漏（例如缺 `.env` 欄位）。
 - 手動執行：
 
   ```bat
@@ -85,7 +88,7 @@ powershell -ExecutionPolicy Bypass -File tools\mailbot\install_task.ps1
   ```
 
   其他參數：`--rules`（預設 `rules.yaml`）、`--env`（預設 `.env`）、`--log-dir`（預設 `log`）。
-- 搜尋條件：`newer_than:{LOOKBACK_DAYS}d has:attachment filename:pdf -label:已記帳 -label:記帳失敗`。有任何失敗時結束碼為 1。
+- 搜尋條件：`newer_than:{LOOKBACK_DAYS}d has:attachment filename:pdf -label:已記帳 -label:記帳失敗`。
 - `log/YYYY-MM-DD.log` 只記主旨與狀態（時間、訊息 ID、狀態、筆數、銀行、主旨、錯誤類型），不含帳單內容與密碼。
 
 ## 安全注意

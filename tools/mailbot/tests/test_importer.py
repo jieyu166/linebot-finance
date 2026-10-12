@@ -27,7 +27,7 @@ class Resp:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(f"{self.status_code} Server Error")
+            raise requests.HTTPError("Server Error", response=self)
 
     def json(self):
         if self._body is None:
@@ -45,7 +45,7 @@ def test_post_import_appends_query_and_parses_json(monkeypatch):
     monkeypatch.setattr(importer.requests, "post", fake_post)
     out = importer.post_import("https://x/exec", {"a": 1})
     assert out == {"ok": True, "written": 3}
-    assert seen == {"url": "https://x/exec?import=1", "json": {"a": 1}, "timeout": 120}
+    assert seen == {"url": "https://x/exec?import=1", "json": {"a": 1}, "timeout": 330}
 
 
 def test_post_import_uses_ampersand_when_query_present(monkeypatch):

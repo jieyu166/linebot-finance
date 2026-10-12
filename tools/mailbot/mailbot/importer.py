@@ -19,7 +19,7 @@ def build_payload(text: str, rule, token: str, message_id: str) -> dict:
     }
 
 
-def post_import(url: str, payload: dict, timeout: int = 120) -> dict:
+def post_import(url: str, payload: dict, timeout: int = 330) -> dict:
     full = url + ("&" if "?" in url else "?") + "import=1"
     try:
         resp = requests.post(full, json=payload, timeout=timeout)
@@ -27,7 +27,7 @@ def post_import(url: str, payload: dict, timeout: int = 120) -> dict:
     except requests.RequestException as e:
         status = getattr(getattr(e, "response", None), "status_code", None)
         detail = f" {status}" if status else ""
-        return {"ok": False, "error": f"http: {type(e).__name__}{detail} {str(e)[:80]}".strip()}
+        return {"ok": False, "error": f"http: {type(e).__name__}{detail}".strip()}
     try:
         body = resp.json()
     except ValueError:

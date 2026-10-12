@@ -59,6 +59,17 @@ t('notifyImportResult 有 LINE_USER_ID → push 摘要；失敗 → 失敗訊息
   props.setProperty('LINE_USER_ID', '');
 });
 
+t('notifyImportResult ok 無 summary → 完成訊息；超長在 surrogate 邊界安全截斷', () => {
+  props.setProperty('LINE_USER_ID', 'Uabc');
+  try {
+    gs.notifyImportResult({ ok: true });
+    assert.strictEqual(JSON.parse(calls[0].options.payload).messages[0].text, '📄 Gmail 匯入完成');
+    gs.notifyImportResult({ ok: true, summary: 'a'.repeat(4899) + '😀' });
+    const txt = JSON.parse(calls[1].options.payload).messages[0].text;
+    assert.strictEqual(txt.length, 4899);
+  } finally { props.setProperty('LINE_USER_ID', ''); }
+});
+
 t('doPost LINE 分支存 LAST_LINE_USER_ID', () => {
   global.handleTextMessage = function() {};
   const body = JSON.stringify({ events: [{ type: 'message', source: { userId: 'Ulast' }, replyToken: 'r', message: { type: 'text', text: 'hi' } }] });

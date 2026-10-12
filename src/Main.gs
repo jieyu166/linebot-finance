@@ -617,6 +617,7 @@ function buildEmptyImportReply(result, source) {
  */
 function handleImportPost(e, ss) {
   var result;
+  var authorized = false;
   try {
     var body = null;
     try { body = JSON.parse(e.postData.contents); } catch (parseErr) { body = null; }
@@ -625,23 +626,31 @@ function handleImportPost(e, ss) {
     } else {
       try {
         requireWebAppAccess(body.token);
-        ss = getSpreadsheet(ss);
-        result = buildImportPostResponse(body, {
-          ss: ss,
-          accounts: getAccounts(ss),
-          expenseCategories: getCategories('支出分類', ss),
-          incomeCategories: getCategories('收入分類', ss),
-          parse: parsePdfWithOpenAI,
-          importFn: importTransactions
-        });
+        authorized = true;
       } catch (authErr) {
-        result = { ok: false, error: authErr && authErr.message ? authErr.message : String(authErr) };
+        Logger.log('handleImportPost auth error: ' + (authErr && authErr.message ? authErr.message : String(authErr)));
+        result = { ok: false, error: '無權限' };
+      }
+      if (authorized) {
+        try {
+          ss = getSpreadsheet(ss);
+          result = buildImportPostResponse(body, {
+            ss: ss,
+            accounts: getAccounts(ss),
+            expenseCategories: getCategories('支出分類', ss),
+            incomeCategories: getCategories('收入分類', ss),
+            parse: parsePdfWithOpenAI,
+            importFn: importTransactions
+          });
+        } catch (procErr) {
+          result = { ok: false, error: procErr && procErr.message ? procErr.message : String(procErr) };
+        }
       }
     }
   } catch (err) {
     result = { ok: false, error: err && err.message ? err.message : String(err) };
   }
-  notifyImportResult(result);
+  if (authorized) { notifyImportResult(result); }
   return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -653,7 +662,14 @@ function notifyImportResult(result) {
   try {
     var id = getConfig('LINE_USER_ID');
     if (!id || String(id).trim() === '') { return; }
-    pushToLine(String(id).trim(), result && result.ok ? result.summary : ('📄 Gmail 匯入失敗：' + (result && result.error)));
+    var text;
+    if (result && result.ok) { text = result.summary ? String(result.summary) : '📄 Gmail 匯入完成'; }
+    else { text = '📄 Gmail 匯入失敗：' + (result && result.error); }
+    if (text.length > 4900) {
+      var c = text.charCodeAt(4899);
+      text = text.slice(0, (c >= 0xD800 && c <= 0xDBFF) ? 4899 : 4900);
+    }
+    pushToLine(String(id).trim(), text);
   } catch (err) {
     Logger.log('notifyImportResult error: ' + err.message);
   }

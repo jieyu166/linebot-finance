@@ -76,9 +76,17 @@ def process_message(client, msg, rules, settings, env, dry_run) -> Outcome:
     return out
 
 
+def _label_name(name) -> str:
+    return str(name).replace('"', "").strip()
+
+
+def _quote_label(name) -> str:
+    return '"' + _label_name(name) + '"'
+
+
 def build_query(settings) -> str:
     return (f"newer_than:{settings.LOOKBACK_DAYS}d has:attachment filename:pdf "
-            f"-label:{settings.LABEL_DONE} -label:{settings.LABEL_FAIL}")
+            f"-label:{_quote_label(settings.LABEL_DONE)} -label:{_quote_label(settings.LABEL_FAIL)}")
 
 
 def _write_log(log_dir, outcome: Outcome, dry_run: bool) -> None:
@@ -104,8 +112,8 @@ def run_once(settings, rules, env, client, dry_run, only_message_id=None, log_di
     ids = [only_message_id] if only_message_id else client.search(build_query(settings))
     label_ids = {}
     if not dry_run and ids:
-        label_ids = {"done": client.ensure_label(settings.LABEL_DONE),
-                     "fail": client.ensure_label(settings.LABEL_FAIL)}
+        label_ids = {"done": client.ensure_label(_label_name(settings.LABEL_DONE)),
+                     "fail": client.ensure_label(_label_name(settings.LABEL_FAIL))}
 
     outcomes: list[Outcome] = []
     for mid in ids:
