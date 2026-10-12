@@ -71,6 +71,7 @@ function curlFetch(url, options) {
     fs.unlinkSync(cfgFile); // config 內含金鑰，用完立刻刪除
   }
   const body = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf8') : '';
+  if (process.env.PROMPT_LIVE_DUMP) { fs.writeFileSync(process.env.PROMPT_LIVE_DUMP, body, 'utf8'); }
   return {
     getResponseCode: function() { return Number(code); },
     getContentText: function() { return body; }
