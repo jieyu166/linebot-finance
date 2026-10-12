@@ -6,6 +6,8 @@ Gmail 銀行對帳單自動匯入工具。
 
 搜尋 Gmail 帳單信 → 依 `rules.yaml` 比對主旨／寄件者 → 下載 PDF 附件（只在記憶體）→ 用 `.env` 的密碼解密（pikepdf）→ 逐頁抽版面文字（pdfplumber）→ POST 給 Apps Script `GAS_IMPORT_URL?import=1`（帶 `WEBAPP_TOKEN`）→ 後端解析並寫入試算表、LINE push 摘要 → 依結果在 Gmail 加標籤「已記帳」或「記帳失敗」。由 Windows 工作排程器在登入後延遲 10 分鐘執行。
 
+文字正規化：抽出的版面文字會經 `normalize_statement_text` 壓縮空白、移除空行（layout 模式的大量填充空白會讓 OpenAI 解析回傳 0 筆）；`decrypt_and_extract(..., raw=True)` 可取得未正規化文字。
+
 目錄約定：
 - 程式碼：`tools/mailbot/`（入版控）。
 - 私人工作目錄：`local/mailbot/`（gitignored），放 `.env`、`rules.yaml`、`credentials.json`、`token.json`、`log/`。**一律從這個目錄執行**。

@@ -47,3 +47,31 @@ def test_multiple_pages_joined_by_newline():
     a.save(buf)
     text = decrypt_and_extract(buf.getvalue(), "")
     assert text.index("PAGE ONE") < text.index("PAGE TWO")
+
+
+def test_normalize_collapses_padding_and_fullwidth_space():
+    from mailbot.pdf_text import normalize_statement_text
+
+    line = "A" + " " * 30 + "B\u3000\u3000C\t\tD  "
+    assert normalize_statement_text("  " + line) == "A B C D"
+
+
+def test_normalize_drops_blank_lines_and_keeps_order():
+    from mailbot.pdf_text import normalize_statement_text
+
+    assert normalize_statement_text("a\n   \n\n\u3000\nb") == "a\nb"
+
+
+def test_normalize_form_feed_splits_pages():
+    from mailbot.pdf_text import normalize_statement_text
+
+    assert normalize_statement_text("p1 x\fp2   y") == "p1 x\np2 y"
+
+
+def test_decrypt_and_extract_normalizes_by_default_and_raw_skips():
+    data = make_pdf("HELLO   MAILBOT")
+    assert "\n\n" not in decrypt_and_extract(data, "")
+    raw = decrypt_and_extract(data, "", raw=True)
+    norm = decrypt_and_extract(data, "")
+    assert len(raw) > len(norm)
+    assert norm == "HELLO MAILBOT"
