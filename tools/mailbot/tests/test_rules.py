@@ -22,6 +22,8 @@ CASES = [
     ("證券月對帳單", "noreply@sinopac.com", "永豐證券", "永豐", "證券"),
     ("複委託月對帳單", "", "永豐外幣", "永豐", "證券"),
     ("王O明君 永豐銀行2026年9月份電子綜合對帳單", "", "永豐大戶", "永豐", "銀行帳戶"),
+    ("第一銀行 115 年 09 月綜合業務對帳單 [郵件編號:x]", "", "一銀", "一銀", "銀行帳戶"),
+    ("台新銀行綜合對帳單 2026年8月份", "", "台新", "台新", "銀行帳戶"),
     ("「樂天國際銀行2026年9月份電子綜合對帳單」暨「個人資訊更新提醒」", "", "樂天", "樂天", "銀行帳戶"),
 ]
 
@@ -31,8 +33,8 @@ def rules():
     return load_rules(EX)
 
 
-def test_seventeen_rules(rules):
-    assert len(rules) == 17
+def test_eighteen_rules(rules):
+    assert len(rules) == 18
 
 
 @pytest.mark.parametrize("subject,sender,hint,bank,kind", CASES)
@@ -75,3 +77,15 @@ def test_first_bank_statement_rule():
     assert rules is not None
     r = match_rule('第一銀行 115 年 08 月綜合對帳單 [郵件編號:20260904Jvl]', 'ebill@firstbank.com.tw', rules)
     assert r is not None and r.bank == '一銀' and r.kind == '銀行帳戶' and r.account_hint == '一銀'
+
+
+def test_pick_pdf_parts_ignores_payment_slips():
+    payload = {"parts": [
+        {"filename": "對帳單.pdf", "body": {"attachmentId": "a"}},
+        {"filename": "信用卡繳款聯.PDF", "body": {"attachmentId": "b"}},
+        {"filename": "PaymentSlip_2026.pdf", "body": {"attachmentId": "c"}},
+        {"filename": "my_payment_slip.pdf", "body": {"attachmentId": "d"}},
+    ]}
+    assert [p["body"]["attachmentId"] for p in pick_pdf_parts(payload)] == ["a"]
+    assert len(pick_pdf_parts(payload, ignore_regex=None)) == 4
+    assert len(pick_pdf_parts(payload, ignore_regex="對帳")) == 3

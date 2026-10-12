@@ -776,8 +776,20 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts,
 
   var resJson = JSON.parse(response.getContentText());
   var content = resJson.choices[0].message.content;
-  var parsed = JSON.parse(content);
+  var parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (jsonErr) {
+    throw new Error('OpenAI 回覆無法解析為 JSON: ' + (jsonErr && jsonErr.message ? jsonErr.message : String(jsonErr)));
+  }
   accounts = accounts || [];
+  var diag = {
+    textChars: String(text || '').length,
+    rawTransactions: parsed && parsed.transactions ? parsed.transactions.length : 0,
+    model: model,
+    afterResolve: 0,
+    final: 0
+  };
 
   if (parsed.transactions) {
     parsed.transactions = parsed.transactions.map(function(tx) {
@@ -813,9 +825,12 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts,
   parsed.unmatchedAccountNumbers = resolved.unmatchedAccountNumbers;
   parsed.intraAccountSkipped = resolved.intraAccountSkipped;
   parsed.fallbackAccountNumbers = resolved.fallbackAccountNumbers;
+  diag.afterResolve = parsed.transactions ? parsed.transactions.length : 0;
   dropSettlementBuyRows(parsed, accounts);
   normalizeCategories(parsed, expenseCategories, incomeCategories);
   checkStatementTotals(parsed);
 
+  diag.final = parsed.transactions ? parsed.transactions.length : 0;
+  parsed.diag = diag;
   return parsed;
 }

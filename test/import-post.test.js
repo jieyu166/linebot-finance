@@ -71,7 +71,26 @@ t('空文字 → ok:false；無交易 → ok:true empty', () => {
   const deps = { ss: {}, accounts: [], expenseCategories: [], incomeCategories: [], parse: () => ({ bank: '永豐', statementType: '複委託', transactions: [] }), importFn: () => { throw new Error('no'); } };
   assert.deepStrictEqual(gs.buildImportPostResponse({ text: '  ' }, deps), { ok: false, error: '帳單文字為空' });
   const r = gs.buildImportPostResponse({ text: 'x' }, deps);
-  assert.deepStrictEqual(r, { ok: true, empty: true, written: 0, skipped: 0, paired: 0, bank: '永豐', statementType: '複委託', summary: '📄 永豐 複委託 本期無交易' });
+  assert.deepStrictEqual(r, { ok: true, empty: true, written: 0, skipped: 0, paired: 0, bank: '永豐', statementType: '複委託', summary: '📄 永豐 複委託 本期無交易', receivedChars: 1, strippedChars: 1 });
+});
+
+t('diag 與 receivedChars/strippedChars 出現在 ok / empty / error 回應', () => {
+  const diag = { textChars: 5, rawTransactions: 28, model: 'm', afterResolve: 0, final: 0 };
+  const mk = (res) => ({ ss: {}, accounts: [], expenseCategories: [], incomeCategories: [], parse: () => res,
+    importFn: (r) => ({ written: r.transactions, skipped: [], pairing: { paired: 0 } }) });
+  const e = gs.buildImportPostResponse({ text: 'hello' }, mk({ bank: 'b', statementType: 's', transactions: [], diag }));
+  assert.strictEqual(e.empty, true);
+  assert.strictEqual(e.diag.rawTransactions, 28);
+  assert.strictEqual(e.receivedChars, 5);
+  assert.ok(e.summary);
+  const o = gs.buildImportPostResponse({ text: 'hello' }, mk({ bank: 'b', statementType: 's', transactions: [tx({})], diag }));
+  assert.strictEqual(o.ok, true);
+  assert.strictEqual(o.diag.rawTransactions, 28);
+  assert.strictEqual(o.receivedChars, 5);
+  assert.strictEqual(o.strippedChars, 5);
+  const x = gs.buildImportPostResponse({ text: 'hello' }, mk({ bank: 'b', statementType: 's', diag }));
+  assert.strictEqual(x.ok, false);
+  assert.strictEqual(x.diag.rawTransactions, 28);
 });
 
 t('無交易 → handleImportPost 不 push LINE', () => {
@@ -89,7 +108,7 @@ t('無交易 → handleImportPost 不 push LINE', () => {
 
 t('相依拋錯 → ok:false 不外洩例外', () => {
   const r = gs.buildImportPostResponse({ text: 'x' }, { parse: () => { throw new Error('boom'); } });
-  assert.deepStrictEqual(r, { ok: false, error: 'boom' });
+  assert.deepStrictEqual(r, { ok: false, error: 'boom', receivedChars: 1, strippedChars: 1 });
 });
 
 t('fallbackAccount：證券列未知銀行 → 歸入 hint 帳戶；無 option → 不指派帳戶', () => {

@@ -3,6 +3,7 @@ rules:
   - {bank: 中信, kind: 信用卡, subject_regex: '中國信託.*信用卡.*電子帳單', pw_env: PDF_PW_CTBC, account_hint: 中信信用卡}
   - {bank: 中信, kind: 銀行帳戶, subject_regex: '中國信託.*銀行.*電子對帳單', pw_env: PDF_PW_CTBC, account_hint: 中信}
   - {bank: 台新, kind: 證券, subject_regex: '台新證券.*月對帳單', pw_env: PDF_PW_TAISHIN, account_hint: 台新}
+  - {bank: 台新, kind: 銀行帳戶, subject_regex: '台新銀行.*綜合對帳單', pw_env: PDF_PW_TAISHIN, account_hint: 台新}
   - {bank: 台新, kind: 信用卡, subject_regex: '台新.*信用卡.*電子帳單', pw_env: PDF_PW_TAISHIN, account_hint: 台新信用卡}
   - {bank: 第一銀行, kind: 信用卡, subject_regex: '第一銀行.*信用卡.*電子對帳單', pw_env: PDF_PW_FIRST, account_hint: 一銀信用卡}
   - {bank: 王道, kind: 銀行帳戶, subject_regex: 'O-?Bank.*綜合對帳單', pw_env: PDF_PW_OBANK, account_hint: 王道}
@@ -18,6 +19,6 @@ rules:
   - {bank: 樂天, kind: 銀行帳戶, subject_regex: '樂天國際銀行.*電子綜合對帳單', pw_env: PDF_PW_RAKUTEN, account_hint: 樂天}
   - bank: 一銀
     kind: 銀行帳戶
-    subject_regex: '第一銀行.*綜合對帳單'
+    subject_regex: '第一銀行.*綜合.*對帳單'
     pw_env: PDF_PW_FIRST
     account_hint: 一銀

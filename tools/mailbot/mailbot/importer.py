@@ -7,10 +7,9 @@ SOURCE = "Gmail匯入"
 
 
 def build_payload(text: str, rule, token: str, message_id: str) -> dict:
-    prefix = f"[mailbot] bank={rule.bank} kind={rule.kind} hint={rule.account_hint}\n"
     return {
         "token": token,
-        "text": prefix + text,
+        "text": text,
         "source": SOURCE,
         "bank": rule.bank,
         "kind": rule.kind,

@@ -9,7 +9,7 @@ from mailbot import importer
 from mailbot.config import password_for
 from mailbot.gmail_client import get_header
 from mailbot.pdf_text import PdfPasswordError, decrypt_and_extract
-from mailbot.rules import match_rule, pick_pdf_parts
+from mailbot.rules import match_rule, split_pdf_parts
 
 
 @dataclass
@@ -22,6 +22,21 @@ class Outcome:
     bank: str = ""
     pdfs: int = 0
     text_lengths: list[int] = field(default_factory=list)
+    ignored: int = 0
+    diags: list[dict] = field(default_factory=list)
+
+
+def format_diag(diags) -> str:
+    """Compact diag summary, e.g. ``raw=28 final=0 chars=27301`` (multiple PDFs joined by ``|``)."""
+    items = []
+    for d in diags or []:
+        bits = []
+        for key, label in (("rawTransactions", "raw"), ("final", "final"), ("receivedChars", "chars")):
+            if d.get(key) is not None:
+                bits.append(f"{label}={d[key]}")
+        if bits:
+            items.append(" ".join(bits))
+    return "|".join(items)
 
 
 def _short(s, n=160) -> str:
@@ -37,10 +52,11 @@ def process_message(client, msg, rules, settings, env, dry_run) -> Outcome:
         out.reason = "no rule"
         return out
     out.bank = rule.bank
-    parts = pick_pdf_parts(msg.get("payload") or {})
+    parts, ignored_parts = split_pdf_parts(msg.get("payload") or {})
     out.pdfs = len(parts)
+    out.ignored = len(ignored_parts)
     if not parts:
-        out.reason = "no pdf attachment"
+        out.reason = f"ignored={out.ignored}" if ignored_parts else "no pdf attachment"
         return out
 
     password = password_for(rule, env)
@@ -65,6 +81,8 @@ def process_message(client, msg, rules, settings, env, dry_run) -> Outcome:
             continue
         payload = importer.build_payload(text, rule, settings.WEBAPP_TOKEN, out.message_id)
         result = importer.post_import(settings.GAS_IMPORT_URL, payload)
+        if isinstance(result.get("diag"), dict):
+            out.diags.append({**result["diag"], "receivedChars": result.get("receivedChars")})
         if result.get("ok"):
             out.posted += 1
             if result.get("empty"):
@@ -77,6 +95,8 @@ def process_message(client, msg, rules, settings, env, dry_run) -> Outcome:
     else:
         out.status = "done"
         out.reason = "dry-run" if dry_run else ("empty" if empties else "")
+        if out.ignored:
+            out.reason = f"{out.reason} ignored={out.ignored}".strip()
     return out
 
 
@@ -107,6 +127,7 @@ def _write_log(log_dir, outcome: Outcome, dry_run: bool) -> None:
         outcome.bank,
         _short(outcome.subject, 120),
         outcome.reason,
+        format_diag(outcome.diags),
     ])
     with open(os.path.join(log_dir, f"{now:%Y-%m-%d}.log"), "a", encoding="utf-8") as f:
         f.write(line + "\n")

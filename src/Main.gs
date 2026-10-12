@@ -683,25 +683,35 @@ function notifyImportResult(result) {
  * @returns {Object} { ok, summary, written, skipped, paired, bank, statementType } 或 { ok:false, error }
  */
 function buildImportPostResponse(body, deps) {
+  var receivedChars = String((body && body.text) || '').length;
+  var strippedChars = 0;
+  var result = null;
+  function withDiag(o) {
+    o.receivedChars = receivedChars;
+    o.strippedChars = strippedChars;
+    if (result && result.diag) { o.diag = result.diag; }
+    return o;
+  }
   try {
     var text = stripGarbledLines(String((body && body.text) || ''));
+    strippedChars = text.length;
     if (text.trim() === '') { return { ok: false, error: '帳單文字為空' }; }
-    var result = deps.parse(text, deps.expenseCategories, deps.incomeCategories, deps.accounts,
+    result = deps.parse(text, deps.expenseCategories, deps.incomeCategories, deps.accounts,
       { fallbackAccount: (body && body.hint) || '' });
     if (result && result.transactions && result.transactions.length === 0) {
       var eb = result.bank || '', et = result.statementType || '';
-      return { ok: true, empty: true, written: 0, skipped: 0, paired: 0, bank: eb, statementType: et,
-        summary: '📄 ' + eb + ' ' + et + ' 本期無交易' };
+      return withDiag({ ok: true, empty: true, written: 0, skipped: 0, paired: 0, bank: eb, statementType: et,
+        summary: '📄 ' + eb + ' ' + et + ' 本期無交易' });
     }
     if (!result || !result.transactions) {
-      return { ok: false, error: buildEmptyImportReply(result || { transactions: [] }, '文字') };
+      return withDiag({ ok: false, error: buildEmptyImportReply(result || { transactions: [] }, '文字') });
     }
     var outcome = deps.importFn(result, 'Gmail匯入', deps.ss);
     var blankAccountRows = 0;
     (outcome.written || []).forEach(function(w) { if (!w.account || String(w.account).trim() === '') { blankAccountRows++; } });
     var summary = buildImportSummary(result, '文字', outcome);
     if (blankAccountRows > 0) { summary += '\n  ⚠ ' + blankAccountRows + ' 筆未對應帳戶（帳戶欄空白，請在 App 修正）'; }
-    return {
+    return withDiag({
       ok: true,
       summary: summary,
       blankAccountRows: blankAccountRows,
@@ -710,8 +720,8 @@ function buildImportPostResponse(body, deps) {
       paired: (outcome.pairing && outcome.pairing.paired) || 0,
       bank: result.bank || '',
       statementType: result.statementType || ''
-    };
+    });
   } catch (err) {
-    return { ok: false, error: err && err.message ? err.message : String(err) };
+    return withDiag({ ok: false, error: err && err.message ? err.message : String(err) });
   }
 }

@@ -402,6 +402,24 @@ t('parsePdfWithOpenAI 回傳經過帳號分流的交易，帳號無 hint 命中�
   assert.deepStrictEqual(r.fallbackAccountNumbers, ['999-99*-**99999-*']);
 });
 
+t('parsePdfWithOpenAI 附 diag（textChars/rawTransactions/model/afterResolve/final）', () => {
+  fakeResponseBody = JSON.stringify({ bank: '永豐銀行', statementType: '銀行帳戶', transactions: [
+    { date: '2026/08/01', type: '收入', category: '回饋', item: '大戶回饋', description: '大戶回饋',
+      institution: '', account: '', currency: 'TWD', amount: '607', accountNumber: '198-01*-**10443-*' }
+  ] });
+  const r = gs.parsePdfWithOpenAI('帳單文字', EXP, INC, accounts());
+  assert.strictEqual(r.diag.textChars, 4);
+  assert.strictEqual(r.diag.rawTransactions, 1);
+  assert.strictEqual(r.diag.model, 'sk-test');
+  assert.strictEqual(r.diag.afterResolve, 1);
+  assert.strictEqual(r.diag.final, 1);
+});
+
+t('parsePdfWithOpenAI 回覆非 JSON → 錯誤訊息以 OpenAI 開頭', () => {
+  fakeResponseBody = 'not json {';
+  assert.throws(() => gs.parsePdfWithOpenAI('x', EXP, INC, accounts()), /^Error: OpenAI/);
+});
+
 t('parsePdfWithOpenAI 帳號無 hint 命中且該銀行無唯一「銀行」帳戶可判定時，維持丟棄並記錄 unmatchedAccountNumbers', () => {
   fakeResponseBody = JSON.stringify({
     bank: '玉山銀行', statementType: '銀行帳戶', skipped: 0,

@@ -59,7 +59,8 @@ def test_done_posts_once_per_pdf_and_labels_done(posts, tmp_path):
     url, payload = posts[0]
     assert url == "https://gas/exec"
     assert payload["token"] == "tok" and payload["messageId"] == "m1"
-    assert payload["text"].startswith("[mailbot] bank=永豐 kind=銀行帳戶 hint=永豐外幣\n")
+    assert not payload["text"].startswith("[mailbot]")
+    assert payload["hint"] == "永豐外幣" and payload["bank"] == "永豐"
     assert "STATEMENT 0" in payload["text"]
     assert client.added == [("m1", "ID-已記帳")]
 
@@ -142,3 +143,30 @@ def test_build_query_quotes_label_names():
         LABEL_FAIL = "記帳 失敗"
     q = processor.build_query(S())
     assert '-label:"My Done label"' in q and '-label:"記帳 失敗"' in q
+
+
+def test_payment_slip_pdf_ignored_not_posted_nor_failed(posts, tmp_path):
+    msg = make_msg("m1", "永豐銀行 綜合對帳單", pdfs=["stmt.pdf", "繳款聯.pdf"])
+    atts = {"m1-att0": make_pdf("STATEMENT", user_pw="pw123"), "m1-att1": make_pdf("SLIP", user_pw="pw123")}
+    client = FakeClient(messages={"m1": msg}, attachments=atts)
+    [out] = run(client, tmp_path)
+    assert out.status == "done" and out.posted == 1 and out.pdfs == 1 and out.ignored == 1
+    assert "ignored=1" in out.reason
+    assert len(posts) == 1
+
+
+def test_only_payment_slips_is_skip(posts, tmp_path):
+    msg = make_msg("m1", "永豐銀行 綜合對帳單", pdfs=["繳款聯.pdf"])
+    client = FakeClient(messages={"m1": msg}, attachments={"m1-att0": make_pdf("SLIP", user_pw="pw123")})
+    [out] = run(client, tmp_path)
+    assert out.status == "skip" and "ignored=1" in out.reason
+    assert posts == []
+
+
+def test_diag_collected_and_formatted(posts, tmp_path):
+    posts.result["value"] = {"ok": True, "empty": True, "receivedChars": 27301,
+                             "diag": {"rawTransactions": 28, "final": 0}}
+    [out] = run(one_msg_client(), tmp_path)
+    assert processor.format_diag(out.diags) == "raw=28 final=0 chars=27301"
+    log = next(tmp_path.iterdir()).read_text(encoding="utf-8")
+    assert "raw=28 final=0 chars=27301" in log

@@ -6,11 +6,11 @@ from mailbot.rules import Rule
 RULE = Rule(bank="永豐", kind="銀行帳戶", subject_regex="x", pw_env="PDF_PW_SINOPAC", account_hint="永豐外幣")
 
 
-def test_build_payload_shape_and_prefix():
+def test_build_payload_shape_without_prefix():
     p = importer.build_payload("line1\nline2", RULE, "tok", "msg-1")
     assert p == {
         "token": "tok",
-        "text": "[mailbot] bank=永豐 kind=銀行帳戶 hint=永豐外幣\nline1\nline2",
+        "text": "line1\nline2",
         "source": "Gmail匯入",
         "bank": "永豐",
         "kind": "銀行帳戶",

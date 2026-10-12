@@ -93,6 +93,10 @@ powershell -ExecutionPolicy Bypass -File tools\mailbot\install_task.ps1
 
 - 無交易的對帳單會標「已記帳」且不推 LINE。
 
+- 附件過濾：檔名符合 `繳款聯|PaymentSlip|payment_slip`（不分大小寫）的 PDF（繳款聯圖片檔）會被忽略，不 POST 也不算失敗；表格／log 的原因欄會顯示 `ignored=N`。若信中只剩被忽略的附件則為 `skip`。
+- 後端診斷：回應若帶 `diag`，表格與 log 會精簡顯示，例如 `raw=28 final=0 chars=27301`（OpenAI 原始筆數、最終筆數、後端收到字數）。
+- `rules.example.yaml` 近期調整：一銀銀行帳戶規則改為 `第一銀行.*綜合.*對帳單`（可匹配「綜合業務對帳單」）；新增「台新銀行綜合對帳單」規則（bank 台新、kind 銀行帳戶、`PDF_PW_TAISHIN`、hint 台新），共 18 條。
+
 ## 安全注意
 
 - `token.json`、`credentials.json`、`.env`（含 PDF 密碼與 `WEBAPP_TOKEN`）、`rules.yaml` 都在 `local/mailbot/`，不進版控。
