@@ -112,3 +112,9 @@ python -m pytest tools/mailbot -q
 ```
 
 測試不連網：Gmail 用假 service、`requests.post` 用 monkeypatch、加密 PDF 由 pikepdf 在測試中產生。
+
+## 不自動處理的帳單
+
+- 中國信託信用卡電子帳單：PDF 為掃描圖檔，抽不出文字，請從網銀複製明細文字貼到 LINE。
+- 第一銀行綜合業務對帳單：只有餘額核對，沒有交易明細，不需匯入。
+- 富邦信用卡、國泰綜合對帳單：信件內為連結，無 PDF，請手動處理。
