@@ -442,6 +442,26 @@ t('isCashWithdrawal：收入類型不成立', () => {
   assert.strictEqual(gs.isCashWithdrawal(tx({ type: '收入', item: '現金提' })), false);
 });
 
+t('isCashWithdrawal：純「提款 100000」不成立', () => {
+  assert.strictEqual(gs.isCashWithdrawal(tx({ type: '支出', item: '提款', amount: 100000 })), false);
+});
+
+t('isCashWithdrawal：現金提 5000 成立', () => {
+  assert.strictEqual(gs.isCashWithdrawal(tx({ type: '支出', item: '現金提', amount: 5000 })), true);
+});
+
+t('isCashWithdrawal：ＡＴＭ提款 20000 成立', () => {
+  assert.strictEqual(gs.isCashWithdrawal(tx({ type: '支出', item: 'ＡＴＭ提款', amount: 20000 })), true);
+});
+
+t('isCashWithdrawal：ATM 跨行提款 50000 超過上限不成立', () => {
+  assert.strictEqual(gs.isCashWithdrawal(tx({ type: '支出', item: 'ATM 跨行提款', amount: 50000 })), false);
+});
+
+t('isCashWithdrawal：提領 3000 不成立', () => {
+  assert.strictEqual(gs.isCashWithdrawal(tx({ type: '支出', item: '提領', amount: 3000 })), false);
+});
+
 // ---- buildCounterpartRow ----
 
 t('buildCounterpartRow：反向交易物件欄位', () => {

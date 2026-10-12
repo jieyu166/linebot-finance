@@ -110,7 +110,7 @@ Per transaction, the logic SHALL branch on category:
    - If exactly one candidate: write the shared transfer ID and category "轉帳" to both rows via `writeTransferCells`; increment `paired`.
    - If more than one candidate: push `<label>：多個候選，請在 App 手動連結` to `details` and skip (no pairing).
    - If zero candidates and `tx.type` is not 支出: skip silently (nothing to do for a 收入-side row awaiting its counterpart).
-   - If zero candidates and `tx.type` is 支出 and `isCashWithdrawal(tx)` is true (description/item matches 現金提／atm提款／提款／提領): find the active 現金-type account matching the transaction's currency and, if found, call `pairWithNewRow(tx, cash, amount, 'ATM 提款', ss)`; increment `paired` and `created`.
+   - If zero candidates and `tx.type` is 支出 and `isCashWithdrawal(tx)` is true (normalized description/item matches 現金提 or atm, AND `tx.amount` <= `CASH_WITHDRAWAL_MAX` = 30000, the per-withdrawal ATM limit in Taiwan; plain 提款／提領 without ATM/現金提, or amounts above the cap, do not qualify): find the active 現金-type account matching the transaction's currency and, if found, call `pairWithNewRow(tx, cash, amount, 'ATM 提款', ss)`; increment `paired` and `created`.
    - Otherwise, call `resolveBrokerageAccount(tx, accounts)`; if it returns a 證券-type account whose currency matches the transaction's currency, call `pairWithNewRow(tx, broker, amount, '交割戶入帳', ss)`; increment `paired` and `created`.
    - Any other category is skipped without side effects.
 

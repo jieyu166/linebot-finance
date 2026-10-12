@@ -253,11 +253,16 @@ function resolveBrokerageAccount(tx, accounts) {
 }
 
 /**
- * 判斷交易是否為 ATM 現金提款
+ * 判斷交易是否為 ATM 現金提款（文字含「現金提」或 ATM，且金額 <= CASH_WITHDRAWAL_MAX）
  * @param {Object} tx - 交易物件
  * @returns {boolean}
  */
-function isCashWithdrawal(tx) { return tx.type === '支出' && /現金提|atm提款|提款|提領/.test(textOf(tx)); }
+// 台灣 ATM 單筆提款上限；超過者視為轉帳而非現金提款
+var CASH_WITHDRAWAL_MAX = 30000;
+
+function isCashWithdrawal(tx) {
+  return tx.type === '支出' && /現金提|atm/.test(textOf(tx)) && Number(tx.amount) <= CASH_WITHDRAWAL_MAX;
+}
 
 /**
  * 建立與來源交易相對應的反向交易物件（用於自動配對新增列）
