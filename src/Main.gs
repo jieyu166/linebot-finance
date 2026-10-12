@@ -46,6 +46,13 @@ function doPost(e) {
 
     var json = JSON.parse(body);
     var events = json.events;
+    try {
+      if (events[0] && events[0].source && events[0].source.userId) {
+        PropertiesService.getScriptProperties().setProperty('LAST_LINE_USER_ID', events[0].source.userId);
+      }
+    } catch (propErr) {
+      Logger.log('save LAST_LINE_USER_ID error: ' + propErr.message);
+    }
 
     for (var i = 0; i < events.length; i++) {
       var event = events[i];
@@ -634,7 +641,22 @@ function handleImportPost(e, ss) {
   } catch (err) {
     result = { ok: false, error: err && err.message ? err.message : String(err) };
   }
+  notifyImportResult(result);
   return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * 匯入完成後把結果 push 到 LINE（未設定 LINE_USER_ID 則略過；絕不影響匯入回應）
+ * @param {Object} result - { ok, summary } 或 { ok:false, error }
+ */
+function notifyImportResult(result) {
+  try {
+    var id = getConfig('LINE_USER_ID');
+    if (!id || String(id).trim() === '') { return; }
+    pushToLine(String(id).trim(), result && result.ok ? result.summary : ('📄 Gmail 匯入失敗：' + (result && result.error)));
+  } catch (err) {
+    Logger.log('notifyImportResult error: ' + err.message);
+  }
 }
 
 /**

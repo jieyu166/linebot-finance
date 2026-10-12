@@ -72,3 +72,28 @@ function downloadContent(messageId) {
 
   return response.getBlob();
 }
+
+/**
+ * 主動推播文字訊息到 LINE（不會丟例外）
+ * @param {string} userId - LINE userId
+ * @param {string} text - 訊息（超過 4900 字截斷）
+ * @returns {number} HTTP 回應碼，失敗回 0
+ */
+function pushToLine(userId, text) {
+  try {
+    var options = {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'Authorization': 'Bearer ' + getConfig('LINE_CHANNEL_ACCESS_TOKEN') },
+      payload: JSON.stringify({ to: userId, messages: [{ type: 'text', text: String(text).slice(0, 4900) }] }),
+      muteHttpExceptions: true
+    };
+    var response = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', options);
+    var code = response.getResponseCode();
+    if (code !== 200) { Logger.log('LINE push error: ' + response.getContentText()); }
+    return code;
+  } catch (err) {
+    Logger.log('LINE push exception: ' + (err && err.message ? err.message : err));
+    return 0;
+  }
+}
