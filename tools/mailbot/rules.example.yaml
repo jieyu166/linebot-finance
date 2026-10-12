@@ -16,3 +16,8 @@ rules:
   - {bank: 永豐, kind: 證券, subject_regex: '複委託月對帳單', pw_env: PDF_PW_SINOPAC, account_hint: 永豐外幣}
   - {bank: 永豐, kind: 銀行帳戶, subject_regex: '永豐銀行.*電子綜合對帳單', pw_env: PDF_PW_SINOPAC, account_hint: 永豐大戶}
   - {bank: 樂天, kind: 銀行帳戶, subject_regex: '樂天國際銀行.*電子綜合對帳單', pw_env: PDF_PW_RAKUTEN, account_hint: 樂天}
+  - bank: 一銀
+    kind: 銀行帳戶
+    subject_regex: '第一銀行.*綜合對帳單'
+    pw_env: PDF_PW_FIRST
+    account_hint: 一銀

@@ -31,8 +31,8 @@ def rules():
     return load_rules(EX)
 
 
-def test_sixteen_rules(rules):
-    assert len(rules) == 16
+def test_seventeen_rules(rules):
+    assert len(rules) == 17
 
 
 @pytest.mark.parametrize("subject,sender,hint,bank,kind", CASES)
@@ -68,3 +68,10 @@ def test_pick_pdf_parts_nested():
     }
     got = pick_pdf_parts(payload)
     assert [p["body"]["attachmentId"] for p in got] == ["a1", "c1"]
+
+
+def test_first_bank_statement_rule():
+    rules = load_rules(EX)
+    assert rules is not None
+    r = match_rule('第一銀行 115 年 08 月綜合對帳單 [郵件編號:20260904Jvl]', 'ebill@firstbank.com.tw', rules)
+    assert r is not None and r.bank == '一銀' and r.kind == '銀行帳戶' and r.account_hint == '一銀'
