@@ -26,6 +26,7 @@ function doGet(e) {
  * @returns {TextOutput} HTTP 回應（一律 200）
  */
 function doPost(e) {
+  if (e && e.parameter && e.parameter.import === '1') { return handleImportPost(e); }
   try {
     var body = e.postData.contents;
 
@@ -598,4 +599,70 @@ function buildImportSummary(result, source, outcome) {
  */
 function buildEmptyImportReply(result, source) {
   return ('無法從此帳單解析出交易紀錄。\n' + buildImportSummary(result, source, null)).trim();
+}
+
+
+/**
+ * Gmail 帳單匯入端點（POST ?import=1，body 為 JSON {token, text, hint}）
+ * @param {Object} e - POST 事件物件
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {TextOutput} JSON 回應（永不拋錯）
+ */
+function handleImportPost(e, ss) {
+  var result;
+  try {
+    var body = null;
+    try { body = JSON.parse(e.postData.contents); } catch (parseErr) { body = null; }
+    if (!body || typeof body !== 'object') {
+      result = { ok: false, error: '無法解析請求' };
+    } else {
+      try {
+        requireWebAppAccess(body.token);
+        ss = getSpreadsheet(ss);
+        result = buildImportPostResponse(body, {
+          ss: ss,
+          accounts: getAccounts(ss),
+          expenseCategories: getCategories('支出分類', ss),
+          incomeCategories: getCategories('收入分類', ss),
+          parse: parsePdfWithOpenAI,
+          importFn: importTransactions
+        });
+      } catch (authErr) {
+        result = { ok: false, error: authErr && authErr.message ? authErr.message : String(authErr) };
+      }
+    }
+  } catch (err) {
+    result = { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * 匯入請求的純邏輯（可注入相依以便測試）
+ * @param {Object} body - { text, hint }
+ * @param {Object} deps - { ss, accounts, expenseCategories, incomeCategories, parse, importFn }
+ * @returns {Object} { ok, summary, written, skipped, paired, bank, statementType } 或 { ok:false, error }
+ */
+function buildImportPostResponse(body, deps) {
+  try {
+    var text = stripGarbledLines(String((body && body.text) || ''));
+    if (text.trim() === '') { return { ok: false, error: '帳單文字為空' }; }
+    var result = deps.parse(text, deps.expenseCategories, deps.incomeCategories, deps.accounts,
+      { fallbackAccount: (body && body.hint) || '' });
+    if (!result || !result.transactions || result.transactions.length === 0) {
+      return { ok: false, error: buildEmptyImportReply(result || { transactions: [] }, '文字') };
+    }
+    var outcome = deps.importFn(result, 'Gmail匯入', deps.ss);
+    return {
+      ok: true,
+      summary: buildImportSummary(result, '文字', outcome),
+      written: outcome.written.length,
+      skipped: (outcome.skipped || []).length,
+      paired: (outcome.pairing && outcome.pairing.paired) || 0,
+      bank: result.bank || '',
+      statementType: result.statementType || ''
+    };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
 }

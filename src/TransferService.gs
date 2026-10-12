@@ -343,7 +343,7 @@ function autoPairImportedTransactions(newTxs, ss) {
 /**
  * 匯入交易的來源標記集合（視為「已匯入」而非手動記帳）
  */
-var IMPORT_SOURCES = { 'PDF匯入': true, '文字匯入': true, '自動配對': true };
+var IMPORT_SOURCES = { 'PDF匯入': true, '文字匯入': true, '自動配對': true, 'Gmail匯入': true };
 
 /**
  * 證券概括品項（尚未寫入具體股名）的判斷樣式
