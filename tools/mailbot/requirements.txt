@@ -1,9 +1,8 @@
 pyyaml
-pytest
+requests
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
 pikepdf
 pdfplumber
-requests
-python-dotenv
+pytest
