@@ -26,6 +26,7 @@ function doGet(e) {
  * @returns {TextOutput} HTTP 回應（一律 200）
  */
 function doPost(e) {
+  if (e && e.parameter && e.parameter.import === '1') { return handleImportPost(e); }
   try {
     var body = e.postData.contents;
 
@@ -45,6 +46,13 @@ function doPost(e) {
 
     var json = JSON.parse(body);
     var events = json.events;
+    try {
+      if (events[0] && events[0].source && events[0].source.userId) {
+        PropertiesService.getScriptProperties().setProperty('LAST_LINE_USER_ID', events[0].source.userId);
+      }
+    } catch (propErr) {
+      Logger.log('save LAST_LINE_USER_ID error: ' + propErr.message);
+    }
 
     for (var i = 0; i < events.length; i++) {
       var event = events[i];
@@ -598,4 +606,106 @@ function buildImportSummary(result, source, outcome) {
  */
 function buildEmptyImportReply(result, source) {
   return ('無法從此帳單解析出交易紀錄。\n' + buildImportSummary(result, source, null)).trim();
+}
+
+
+/**
+ * Gmail 帳單匯入端點（POST ?import=1，body 為 JSON {token, text, hint}）
+ * @param {Object} e - POST 事件物件
+ * @param {Spreadsheet} [ss] - 可選的試算表物件
+ * @returns {TextOutput} JSON 回應（永不拋錯）
+ */
+function handleImportPost(e, ss) {
+  var result;
+  var authorized = false;
+  try {
+    var body = null;
+    try { body = JSON.parse(e.postData.contents); } catch (parseErr) { body = null; }
+    if (!body || typeof body !== 'object') {
+      result = { ok: false, error: '無法解析請求' };
+    } else {
+      try {
+        requireWebAppAccess(body.token);
+        authorized = true;
+      } catch (authErr) {
+        Logger.log('handleImportPost auth error: ' + (authErr && authErr.message ? authErr.message : String(authErr)));
+        result = { ok: false, error: '無權限' };
+      }
+      if (authorized) {
+        try {
+          ss = getSpreadsheet(ss);
+          result = buildImportPostResponse(body, {
+            ss: ss,
+            accounts: getAccounts(ss),
+            expenseCategories: getCategories('支出分類', ss),
+            incomeCategories: getCategories('收入分類', ss),
+            parse: parsePdfWithOpenAI,
+            importFn: importTransactions
+          });
+        } catch (procErr) {
+          result = { ok: false, error: procErr && procErr.message ? procErr.message : String(procErr) };
+        }
+      }
+    }
+  } catch (err) {
+    result = { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+  if (authorized) { notifyImportResult(result); }
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * 匯入完成後把結果 push 到 LINE（未設定 LINE_USER_ID 則略過；絕不影響匯入回應）
+ * @param {Object} result - { ok, summary } 或 { ok:false, error }
+ */
+function notifyImportResult(result) {
+  try {
+    var id = getConfig('LINE_USER_ID');
+    if (!id || String(id).trim() === '') { return; }
+    var text;
+    if (result && result.ok) { text = result.summary ? String(result.summary) : '📄 Gmail 匯入完成'; }
+    else { text = '📄 Gmail 匯入失敗：' + (result && result.error); }
+    if (text.length > 4900) {
+      var c = text.charCodeAt(4899);
+      text = text.slice(0, (c >= 0xD800 && c <= 0xDBFF) ? 4899 : 4900);
+    }
+    pushToLine(String(id).trim(), text);
+  } catch (err) {
+    Logger.log('notifyImportResult error: ' + err.message);
+  }
+}
+
+/**
+ * 匯入請求的純邏輯（可注入相依以便測試）
+ * @param {Object} body - { text, hint }
+ * @param {Object} deps - { ss, accounts, expenseCategories, incomeCategories, parse, importFn }
+ * @returns {Object} { ok, summary, written, skipped, paired, bank, statementType } 或 { ok:false, error }
+ */
+function buildImportPostResponse(body, deps) {
+  try {
+    var text = stripGarbledLines(String((body && body.text) || ''));
+    if (text.trim() === '') { return { ok: false, error: '帳單文字為空' }; }
+    var result = deps.parse(text, deps.expenseCategories, deps.incomeCategories, deps.accounts,
+      { fallbackAccount: (body && body.hint) || '' });
+    if (!result || !result.transactions || result.transactions.length === 0) {
+      return { ok: false, error: buildEmptyImportReply(result || { transactions: [] }, '文字') };
+    }
+    var outcome = deps.importFn(result, 'Gmail匯入', deps.ss);
+    var blankAccountRows = 0;
+    (outcome.written || []).forEach(function(w) { if (!w.account || String(w.account).trim() === '') { blankAccountRows++; } });
+    var summary = buildImportSummary(result, '文字', outcome);
+    if (blankAccountRows > 0) { summary += '\n  ⚠ ' + blankAccountRows + ' 筆未對應帳戶（帳戶欄空白，請在 App 修正）'; }
+    return {
+      ok: true,
+      summary: summary,
+      blankAccountRows: blankAccountRows,
+      written: outcome.written.length,
+      skipped: (outcome.skipped || []).length,
+      paired: (outcome.pairing && outcome.pairing.paired) || 0,
+      bank: result.bank || '',
+      statementType: result.statementType || ''
+    };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
 }

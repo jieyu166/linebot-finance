@@ -306,10 +306,15 @@ function findAccountByTypeAndBank(accounts, type, bank, currency) {
  * （命中則記入 parsed.fallbackAccountNumbers；仍無法唯一判定才維持丟棄＋unmatchedAccountNumbers）
  * @param {Object} parsed - OpenAI 解析結果
  * @param {Object[]} accounts - 帳戶清單
+ * @param {{fallbackAccount: string}} [options] - fallbackAccount：無法對應任何帳戶的列改記入此帳戶
  * @returns {{transactions: Object[], unmatchedAccountNumbers: string[], intraAccountSkipped: Object[], fallbackAccountNumbers: string[]}}
  */
-function resolveImportedAccounts(parsed, accounts) {
+function resolveImportedAccounts(parsed, accounts, options) {
   var out = [], unmatched = {}, skipped = [], st = parsed.statementType || '';
+  var hintName = options && options.fallbackAccount ? options.fallbackAccount : '';
+  var hintAcct = hintName ? findAccountByName(accounts, hintName) : null;
+  if (hintAcct && hintAcct.active === false) { hintAcct = null; }
+  var hintRows = 0;
   (parsed.transactions || []).forEach(function(tx) {
     var currency = String(tx.currency || 'TWD').toUpperCase();
     var acct = null;
@@ -326,7 +331,8 @@ function resolveImportedAccounts(parsed, accounts) {
           }
         }
       }
-      if (!acct) { unmatched[tx.accountNumber] = true; return; }
+      if (!acct && hintAcct && currency === hintAcct.currency) { acct = hintAcct; hintRows++; }
+      else if (!acct) { unmatched[tx.accountNumber] = true; return; }
       if (tx.category === '轉帳') {
         var cp = matchCounterpartyAccount(tx.description, accounts);
         if (cp && cp.name === acct.name) { // 同帳戶內轉
@@ -347,6 +353,7 @@ function resolveImportedAccounts(parsed, accounts) {
           || acct;
       }
     }
+    if (!acct && hintAcct && currency === hintAcct.currency) { acct = hintAcct; hintRows++; }
     if (acct) {
       tx.account = acct.name;
       tx.institution = acct.institution;
@@ -356,11 +363,13 @@ function resolveImportedAccounts(parsed, accounts) {
     }
     out.push(tx);
   });
+  parsed.fallbackHintRows = hintRows;
   return {
     transactions: out,
     unmatchedAccountNumbers: Object.keys(unmatched),
     intraAccountSkipped: skipped,
-    fallbackAccountNumbers: parsed.fallbackAccountNumbers || []
+    fallbackAccountNumbers: parsed.fallbackAccountNumbers || [],
+    fallbackHintRows: hintRows
   };
 }
 
@@ -728,9 +737,10 @@ function checkStatementTotals(parsed) {
  * @param {string[]} expenseCategories - 支出分類清單
  * @param {string[]} incomeCategories - 收入分類清單
  * @param {Object[]} accounts - 帳戶物件陣列
+ * @param {Object} [importOptions] - { fallbackAccount }
  * @returns {Object} { bank, statementType, transactions: [...], skipped, unmatchedAccountNumbers }
  */
-function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts) {
+function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts, importOptions) {
   var apiKey = getConfig('OPENAI_API_KEY');
   var url = 'https://api.openai.com/v1/chat/completions';
 
@@ -797,7 +807,8 @@ function parsePdfWithOpenAI(text, expenseCategories, incomeCategories, accounts)
   forceCardPaymentCategory(parsed);
   fixCardStatementRows(parsed);
   parsed = extractFxCardPayment(parsed, accounts);
-  var resolved = resolveImportedAccounts(parsed, accounts);
+  var resolved = resolveImportedAccounts(parsed, accounts, importOptions);
+  parsed.fallbackHintRows = resolved.fallbackHintRows;
   parsed.transactions = resolved.transactions;
   parsed.unmatchedAccountNumbers = resolved.unmatchedAccountNumbers;
   parsed.intraAccountSkipped = resolved.intraAccountSkipped;

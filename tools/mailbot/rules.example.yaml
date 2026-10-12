@@ -1,0 +1,18 @@
+# Order matters: first match wins. Specific patterns before generic ones.
+rules:
+  - {bank: 中信, kind: 信用卡, subject_regex: '中國信託.*信用卡.*電子帳單', pw_env: PDF_PW_CTBC, account_hint: 中信信用卡}
+  - {bank: 中信, kind: 銀行帳戶, subject_regex: '中國信託.*銀行.*電子對帳單', pw_env: PDF_PW_CTBC, account_hint: 中信}
+  - {bank: 台新, kind: 證券, subject_regex: '台新證券.*月對帳單', pw_env: PDF_PW_TAISHIN, account_hint: 台新}
+  - {bank: 台新, kind: 信用卡, subject_regex: '台新.*信用卡.*電子帳單', pw_env: PDF_PW_TAISHIN, account_hint: 台新信用卡}
+  - {bank: 第一銀行, kind: 信用卡, subject_regex: '第一銀行.*信用卡.*電子對帳單', pw_env: PDF_PW_FIRST, account_hint: 一銀信用卡}
+  - {bank: 王道, kind: 銀行帳戶, subject_regex: 'O-?Bank.*綜合對帳單', pw_env: PDF_PW_OBANK, account_hint: 王道}
+  - {bank: 富邦, kind: 銀行帳戶, subject_regex: '台北富邦銀行.*銀行對帳單', pw_env: PDF_PW_FUBON, account_hint: 富邦}
+  - {bank: 國泰, kind: 信用卡, subject_regex: '國泰世華銀行信用卡.*電子帳單', pw_env: PDF_PW_CATHAY, account_hint: 國泰信用卡}
+  - {bank: 玉山, kind: 信用卡, subject_regex: '玉山銀行.*信用卡.*電子帳單', pw_env: PDF_PW_ESUN, account_hint: 玉山信用卡}
+  - {bank: 玉山, kind: 證券, subject_regex: '玉山證券.*綜合月對帳單', pw_env: PDF_PW_ESUN, account_hint: 玉山}
+  - {bank: 玉山, kind: 銀行帳戶, subject_regex: '玉山銀行.*綜合對帳單', pw_env: PDF_PW_ESUN, account_hint: 玉山}
+  - {bank: 永豐, kind: 信用卡, subject_regex: '永豐銀行信用卡.*電子帳單', pw_env: PDF_PW_SINOPAC, account_hint: 永豐信用卡}
+  - {bank: 永豐, kind: 證券, subject_regex: '證券月對帳單', from_regex: 'sinopac|永豐', pw_env: PDF_PW_SINOPAC, account_hint: 永豐證券}
+  - {bank: 永豐, kind: 證券, subject_regex: '複委託月對帳單', pw_env: PDF_PW_SINOPAC, account_hint: 永豐外幣}
+  - {bank: 永豐, kind: 銀行帳戶, subject_regex: '永豐銀行.*電子綜合對帳單', pw_env: PDF_PW_SINOPAC, account_hint: 永豐大戶}
+  - {bank: 樂天, kind: 銀行帳戶, subject_regex: '樂天國際銀行.*電子綜合對帳單', pw_env: PDF_PW_RAKUTEN, account_hint: 樂天}

@@ -1,0 +1,1 @@
+"""mailbot: Gmail statement fetcher."""

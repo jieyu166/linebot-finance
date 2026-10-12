@@ -50,9 +50,18 @@ function initializeProperties() {
     'LINE_CHANNEL_SECRET': '請替換為你的 LINE Channel Secret',
     'LINE_CHANNEL_ACCESS_TOKEN': '請替換為你的 LINE Channel Access Token',
     'SHEET_ID': '請替換為你的 Google 試算表 ID',
-    'WEBAPP_TOKEN': '執行 setupWebAppToken() 自動產生'
+    'WEBAPP_TOKEN': '執行 setupWebAppToken() 自動產生',
+    'LINE_USER_ID': '（選填）執行 printLastLineUserId() 取得，設定後 Gmail 匯入結果會 push 到 LINE'
   });
   Logger.log('Script Properties 已初始化，請確認已替換為實際值');
+}
+
+/**
+ * 在執行記錄印出最近一次傳訊給 Bot 的 LINE userId（供設定 LINE_USER_ID）
+ */
+function printLastLineUserId() {
+  var id = PropertiesService.getScriptProperties().getProperty('LAST_LINE_USER_ID');
+  Logger.log(id ? id : '尚未收到任何 LINE 訊息，請先傳一則訊息給 Bot 再執行');
 }
 
 /**

@@ -263,11 +263,22 @@ LINE Webhook 部署一定要設「所有人」都能存取才收得到 LINE 平�
 1. 貼上最新 src/ 全部檔案：9 個 .gs（新增 WebApp.gs、WebAppLogic.gs）與 4 個 HTML（Index、Styles、ClientLogic、App，用「新增 → HTML」建立）
 2. 執行 initializeSheets()（補標題、預算表、收入分類「轉帳」、缺少的帳戶；若已執行過 runMigrations() 且結果不對，先執行 undoMigrations() 還原）
 3. 執行 backfillTransactionIds()
-4. 編輯 Config.gs 的 INITIAL_BALANCES（銀行填 8/31 實際餘額；信用卡填最近一期本期應繳的負數與該期結帳日），執行 previewInitialBalances() 確認，再執行 applyInitialBalances()
+4. （注意：repo 內的 `INITIAL_BALANCES` 是歸零範本；拉取程式碼後**不要**重跑 `applyInitialBalances()`，除非你已重新填入數值，真實數字請放在 `local/`，不要提交。）編輯 Config.gs 的 INITIAL_BALANCES（銀行填 8/31 實際餘額；信用卡填最近一期本期應繳的負數與該期結帳日），執行 previewInitialBalances() 確認，再執行 applyInitialBalances()
 5. 執行 previewMigrations() 看 Logger 預覽（搬移對照表在 Config.gs 的 MIGRATIONS）。migrateCreditCardRows() 預設會自動排除「繳信用卡／轉帳／利息／回饋／薪資／股利／貸款／投資／投資獲利／兼職／獎金／家人給」分類，以及品項/描述含「連結帳戶、利息、回饋、轉帳、換匯、卡費、還本、存入、薪資、股息、ACH、定期買股、交割、提款、現金提」的列，這些列會在 Logger 印出 `[排除]` 且不會被搬移；只有真正的信用卡消費商戶列才會搬移，因此永豐大戶→永豐信用卡不再需要限制日期區間也是安全的。確認 Logger 預覽結果無誤後執行 runMigrations()。搬移結果不對時可執行 undoMigrations()（或先 previewUndoMigrations() 預覽）把信用卡帳戶上的消費列搬回原扣款帳戶。
 6. 執行 previewCreditCardPairing() 預覽，再執行 runCreditCardPairing() 補配對。
 7. 在 LINE 傳「餘額」核對
 ```
+
+## Gmail 帳單自動匯入
+
+`tools/mailbot/` 會定期掃描 Gmail 的銀行帳單 PDF，解密抽字後 POST 到 LINE 部署的 `/exec?import=1`，自動寫入試算表並以 LINE push 回報。完整設定見 [tools/mailbot/README.md](tools/mailbot/README.md)。
+
+Apps Script 端需要的 Script Properties：
+
+- `WEBAPP_TOKEN`：執行 `setupWebAppToken()` 產生，mailbot 的 `.env` 要填相同值。
+- `LINE_USER_ID`（選填）：收 push 摘要的對象；在 LINE 傳一則訊息後，於編輯器執行 `printLastLineUserId()` 取得。
+
+注意：推送程式碼（`clasp push`）後，**LINE 部署必須重新建立版本**（部署 → 管理部署作業 → 編輯 → 新版本），`/exec` 才會執行新程式碼。
 
 ## 本機測試
 
