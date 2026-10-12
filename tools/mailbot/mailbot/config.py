@@ -32,10 +32,17 @@ class Settings:
 
     @classmethod
     def from_env(cls, env: dict[str, str]) -> "Settings":
+        raw_days = env.get("LOOKBACK_DAYS") or "45"
+        try:
+            days = int(raw_days)
+        except ValueError:
+            raise ValueError(f"LOOKBACK_DAYS must be an integer, got {raw_days!r}") from None
+        if days <= 0:
+            raise ValueError(f"LOOKBACK_DAYS must be a positive integer, got {raw_days!r}")
         return cls(
             GAS_IMPORT_URL=env.get("GAS_IMPORT_URL", ""),
             WEBAPP_TOKEN=env.get("WEBAPP_TOKEN", ""),
-            LOOKBACK_DAYS=int(env.get("LOOKBACK_DAYS") or 45),
+            LOOKBACK_DAYS=days,
             LABEL_DONE=env.get("LABEL_DONE") or "已記帳",
             LABEL_FAIL=env.get("LABEL_FAIL") or "記帳失敗",
         )

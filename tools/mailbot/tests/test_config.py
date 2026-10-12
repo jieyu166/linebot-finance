@@ -1,3 +1,5 @@
+import pytest
+
 from mailbot.config import Settings, load_env, password_for
 from mailbot.rules import Rule
 
@@ -29,3 +31,9 @@ def test_password_for():
     r = Rule("b", "k", "s", "PDF_PW_X")
     assert password_for(r, {"PDF_PW_X": "pw"}) == "pw"
     assert password_for(r, {}) == ""
+
+
+@pytest.mark.parametrize("bad", ["abc", "4.5", "0", "-3"])
+def test_lookback_days_invalid(bad):
+    with pytest.raises(ValueError, match="LOOKBACK_DAYS"):
+        Settings.from_env({"LOOKBACK_DAYS": bad})

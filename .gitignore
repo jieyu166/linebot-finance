@@ -15,5 +15,6 @@ test/fixtures/
 tools/mailbot/token.json
 tools/mailbot/credentials.json
 tools/mailbot/.env
+tools/mailbot/rules.yaml
 __pycache__/
 .pytest_cache/
