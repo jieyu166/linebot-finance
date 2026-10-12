@@ -85,4 +85,45 @@ t('doPost import=1：空 body 回 ok:false JSON', () => {
   assert.strictEqual(JSON.parse(out.getContent()).ok, false);
 });
 
+t('hint 幣別不符 → 維持未對應（USD 保留）；幣別相符才指派', () => {
+  const hintAccts = () => [acct('永豐大戶', '永豐銀行', 'TWD', '銀行')];
+  const mk = (c) => ({ bank: '某海外券商', statementType: '證券', transactions: [tx({ item: 'Z', currency: c })] });
+  const r1 = gs.resolveImportedAccounts(mk('USD'), hintAccts(), { fallbackAccount: '永豐大戶' });
+  assert.strictEqual(r1.transactions[0].account, '');
+  assert.strictEqual(r1.transactions[0].currency, 'USD');
+  assert.strictEqual(r1.fallbackHintRows, 0);
+  const r2 = gs.resolveImportedAccounts(mk('TWD'), hintAccts(), { fallbackAccount: '永豐大戶' });
+  assert.strictEqual(r2.transactions[0].account, '永豐大戶');
+  assert.strictEqual(r2.fallbackHintRows, 1);
+});
+
+t('inactive hint 帳戶被忽略', () => {
+  const a = accounts(); a[0].active = false;
+  const r = gs.resolveImportedAccounts({ bank: '某海外券商', statementType: '證券', transactions: [tx({})] }, a, { fallbackAccount: '永豐外幣' });
+  assert.strictEqual(r.transactions[0].account, '');
+  assert.strictEqual(r.fallbackHintRows, 0);
+});
+
+t('空白帳戶列 → blankAccountRows 與警示行', () => {
+  const r = gs.buildImportPostResponse({ text: 'x' }, {
+    ss: {}, accounts: [], expenseCategories: [], incomeCategories: [],
+    parse: () => ({ bank: 'B', statementType: '證券', transactions: [tx({}), tx({})] }),
+    importFn: () => ({ written: [tx({ account: '' }), tx({ account: '永豐外幣' })], skipped: [], merged: 0, pairing: { paired: 0 } })
+  });
+  assert.strictEqual(r.blankAccountRows, 1);
+  assert.ok(r.summary.indexOf('⚠ 1 筆未對應帳戶（帳戶欄空白，請在 App 修正）') >= 0);
+  const r0 = gs.buildImportPostResponse({ text: 'x' }, {
+    ss: {}, accounts: [], expenseCategories: [], incomeCategories: [],
+    parse: () => ({ bank: 'B', statementType: '證券', transactions: [tx({})] }),
+    importFn: () => ({ written: [tx({ account: '永豐外幣' })], skipped: [], merged: 0, pairing: { paired: 0 } })
+  });
+  assert.strictEqual(r0.blankAccountRows, 0);
+  assert.ok(r0.summary.indexOf('⚠') < 0);
+});
+
+t('handleImportPost postData 缺 → ok:false', () => {
+  const r = JSON.parse(gs.handleImportPost({ parameter: { import: '1' } }).getContent());
+  assert.strictEqual(r.ok, false);
+});
+
 if (failed > 0) { console.log(failed + ' failed'); process.exit(1); }

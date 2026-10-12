@@ -331,7 +331,7 @@ function resolveImportedAccounts(parsed, accounts, options) {
           }
         }
       }
-      if (!acct && hintAcct) { acct = hintAcct; hintRows++; }
+      if (!acct && hintAcct && currency === hintAcct.currency) { acct = hintAcct; hintRows++; }
       else if (!acct) { unmatched[tx.accountNumber] = true; return; }
       if (tx.category === '轉帳') {
         var cp = matchCounterpartyAccount(tx.description, accounts);
@@ -353,7 +353,7 @@ function resolveImportedAccounts(parsed, accounts, options) {
           || acct;
       }
     }
-    if (!acct && hintAcct) { acct = hintAcct; hintRows++; }
+    if (!acct && hintAcct && currency === hintAcct.currency) { acct = hintAcct; hintRows++; }
     if (acct) {
       tx.account = acct.name;
       tx.institution = acct.institution;

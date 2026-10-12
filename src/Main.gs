@@ -675,9 +675,14 @@ function buildImportPostResponse(body, deps) {
       return { ok: false, error: buildEmptyImportReply(result || { transactions: [] }, '文字') };
     }
     var outcome = deps.importFn(result, 'Gmail匯入', deps.ss);
+    var blankAccountRows = 0;
+    (outcome.written || []).forEach(function(w) { if (!w.account || String(w.account).trim() === '') { blankAccountRows++; } });
+    var summary = buildImportSummary(result, '文字', outcome);
+    if (blankAccountRows > 0) { summary += '\n  ⚠ ' + blankAccountRows + ' 筆未對應帳戶（帳戶欄空白，請在 App 修正）'; }
     return {
       ok: true,
-      summary: buildImportSummary(result, '文字', outcome),
+      summary: summary,
+      blankAccountRows: blankAccountRows,
       written: outcome.written.length,
       skipped: (outcome.skipped || []).length,
       paired: (outcome.pairing && outcome.pairing.paired) || 0,
