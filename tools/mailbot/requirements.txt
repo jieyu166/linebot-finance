@@ -1,0 +1,9 @@
+pyyaml
+pytest
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+pikepdf
+pdfplumber
+requests
+python-dotenv
