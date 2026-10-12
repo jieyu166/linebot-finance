@@ -660,6 +660,7 @@ function handleImportPost(e, ss) {
  */
 function notifyImportResult(result) {
   try {
+    if (result && result.empty) { return; }
     var id = getConfig('LINE_USER_ID');
     if (!id || String(id).trim() === '') { return; }
     var text;
@@ -687,7 +688,12 @@ function buildImportPostResponse(body, deps) {
     if (text.trim() === '') { return { ok: false, error: '帳單文字為空' }; }
     var result = deps.parse(text, deps.expenseCategories, deps.incomeCategories, deps.accounts,
       { fallbackAccount: (body && body.hint) || '' });
-    if (!result || !result.transactions || result.transactions.length === 0) {
+    if (result && result.transactions && result.transactions.length === 0) {
+      var eb = result.bank || '', et = result.statementType || '';
+      return { ok: true, empty: true, written: 0, skipped: 0, paired: 0, bank: eb, statementType: et,
+        summary: '📄 ' + eb + ' ' + et + ' 本期無交易' };
+    }
+    if (!result || !result.transactions) {
       return { ok: false, error: buildEmptyImportReply(result || { transactions: [] }, '文字') };
     }
     var outcome = deps.importFn(result, 'Gmail匯入', deps.ss);

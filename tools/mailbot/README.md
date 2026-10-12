@@ -91,6 +91,8 @@ powershell -ExecutionPolicy Bypass -File tools\mailbot\install_task.ps1
 - 搜尋條件：`newer_than:{LOOKBACK_DAYS}d has:attachment filename:pdf -label:已記帳 -label:記帳失敗`。
 - `log/YYYY-MM-DD.log` 只記主旨與狀態（時間、訊息 ID、狀態、筆數、銀行、主旨、錯誤類型），不含帳單內容與密碼。
 
+- 無交易的對帳單會標「已記帳」且不推 LINE。
+
 ## 安全注意
 
 - `token.json`、`credentials.json`、`.env`（含 PDF 密碼與 `WEBAPP_TOKEN`）、`rules.yaml` 都在 `local/mailbot/`，不進版控。

@@ -45,6 +45,7 @@ def process_message(client, msg, rules, settings, env, dry_run) -> Outcome:
 
     password = password_for(rule, env)
     errors: list[str] = []
+    empties = 0
     for part in parts:
         name = part.get("filename") or "?"
         try:
@@ -66,13 +67,16 @@ def process_message(client, msg, rules, settings, env, dry_run) -> Outcome:
         result = importer.post_import(settings.GAS_IMPORT_URL, payload)
         if result.get("ok"):
             out.posted += 1
+            if result.get("empty"):
+                empties += 1
         else:
             errors.append(f"{name}: post {_short(result.get('error') or 'not ok', 80)}")
 
     if errors:
         out.status, out.reason = "fail", _short("; ".join(errors), 300)
     else:
-        out.status, out.reason = "done", ("dry-run" if dry_run else "")
+        out.status = "done"
+        out.reason = "dry-run" if dry_run else ("empty" if empties else "")
     return out
 
 

@@ -64,6 +64,14 @@ def test_done_posts_once_per_pdf_and_labels_done(posts, tmp_path):
     assert client.added == [("m1", "ID-已記帳")]
 
 
+def test_empty_statement_is_success_with_reason_empty(posts, tmp_path):
+    posts.result["value"] = {"ok": True, "empty": True, "written": 0}
+    client = one_msg_client()
+    [out] = run(client, tmp_path)
+    assert out.status == "done" and out.reason == "empty" and out.posted == 1
+    assert client.added == [("m1", "ID-已記帳")]
+
+
 def test_query_excludes_labels_and_uses_lookback(posts, tmp_path):
     client = one_msg_client()
     run(client, tmp_path)

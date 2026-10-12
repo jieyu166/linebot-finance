@@ -67,12 +67,24 @@ t('buildImportPostResponse 正常流程', () => {
   assert.strictEqual(r.bank, '永豐銀行');
 });
 
-t('空文字 → ok:false；無交易 → ok:false', () => {
-  const deps = { ss: {}, accounts: [], expenseCategories: [], incomeCategories: [], parse: () => ({ transactions: [] }), importFn: () => { throw new Error('no'); } };
+t('空文字 → ok:false；無交易 → ok:true empty', () => {
+  const deps = { ss: {}, accounts: [], expenseCategories: [], incomeCategories: [], parse: () => ({ bank: '永豐', statementType: '複委託', transactions: [] }), importFn: () => { throw new Error('no'); } };
   assert.deepStrictEqual(gs.buildImportPostResponse({ text: '  ' }, deps), { ok: false, error: '帳單文字為空' });
   const r = gs.buildImportPostResponse({ text: 'x' }, deps);
-  assert.strictEqual(r.ok, false);
-  assert.ok(r.error.indexOf('無法從此帳單解析出交易紀錄') >= 0);
+  assert.deepStrictEqual(r, { ok: true, empty: true, written: 0, skipped: 0, paired: 0, bank: '永豐', statementType: '複委託', summary: '📄 永豐 複委託 本期無交易' });
+});
+
+t('無交易 → handleImportPost 不 push LINE', () => {
+  const props = gs.PropertiesService.getScriptProperties();
+  props.setProperty('LINE_USER_ID', 'Uabc');
+  props.setProperty('LINE_CHANNEL_ACCESS_TOKEN', 'x');
+  try {
+    fetchCalls.length = 0;
+    gs.notifyImportResult({ ok: true, empty: true, summary: 's' });
+    assert.strictEqual(fetchCalls.length, 0);
+    gs.notifyImportResult({ ok: true, summary: 's' });
+    assert.strictEqual(fetchCalls.length, 1);
+  } finally { props.setProperty('LINE_USER_ID', ''); }
 });
 
 t('相依拋錯 → ok:false 不外洩例外', () => {
