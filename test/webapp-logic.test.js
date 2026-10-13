@@ -15,6 +15,15 @@ t('filterTransactionsByMonth 依月份且日期降冪', () => {
   ], '2026-08');
   assert.deepStrictEqual(out.map(x => x.rowIndex), [5, 4, 2]);
 });
+t('summarizeByCategory 帳戶篩選（normalizeName 比對）', () => {
+  const r = gs.summarizeByCategory([
+    { type: '支出', category: '飲食', amount: 100, account: '現 金' },
+    { type: '支出', category: '飲食', amount: 50, account: '銀行' }
+  ], '支出', '現金');
+  assert.strictEqual(r.total, 100);
+  assert.strictEqual(gs.summarizeByCategory([{ type: '支出', category: 'a', amount: 5, account: 'x' }], '支出', '').total, 5);
+});
+
 t('summarizeByCategory 排除轉帳配對並算比例', () => {
   const r = gs.summarizeByCategory([
     tx({ date: '2026/08/01', category: '飲食', amount: 300 }), tx({ date: '2026/08/02', category: '交通', amount: 100 }),

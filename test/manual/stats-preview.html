@@ -71,6 +71,16 @@
     font-size: 13px;
     color: var(--muted);
   }
+  .account-filter { padding: 0 12px 8px; text-align: center; }
+  .account-filter select {
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #E3E6EB;
+    border-radius: 8px;
+    background: var(--card);
+    font-size: 14px;
+  }
+  .filter-sum { text-align: center; font-size: 12px; color: var(--muted); padding: 0 12px 6px; }
   .chip .x { cursor: pointer; color: var(--accent); font-weight: bold; }
 
   /* ---- 日期分組 ---- */
@@ -737,14 +747,15 @@
 <body>
 <div id="app"></div>
 <script>
-var __mockData = {"bootstrap":{"today":"2026/09/07","accounts":[{"name":"現金","currency":"TWD","type":"現金"},{"name":"銀行","currency":"TWD","type":"銀行"},{"name":"玉山","currency":"TWD","type":"銀行"},{"name":"中信信用卡","currency":"TWD","type":"信用卡"}],"expenseCategories":[{"name":"飲食","icon":"🍚","color":"#FF7043"},{"name":"交通","icon":"🚗","color":"#3F7CFF"},{"name":"娛樂","icon":"🎮","color":"#43A047"}],"incomeCategories":[{"name":"薪資","icon":"💰","color":"#8E24AA"}]},"transactions":[],"stats":{"2026-09|支出":{"total":6000,"byCategory":[{"name":"飲食","amount":3000,"ratio":0.5},{"name":"交通","amount":2000,"ratio":0.3333},{"name":"娛樂","amount":1000,"ratio":0.1667}]},"2026-09|收入":{"total":40000,"byCategory":[{"name":"薪資","amount":40000,"ratio":1}]}},"balances":[{"name":"現金","type":"現金","currency":"TWD","initialBalance":1000,"initialDate":"2026/01/01","transactionTotal":500,"currentBalance":1500,"txCount":5},{"name":"銀行","type":"銀行","currency":"TWD","initialBalance":50000,"initialDate":"2026/01/01","transactionTotal":-2000,"currentBalance":48000,"txCount":8},{"name":"玉山","type":"銀行","currency":"TWD","initialBalance":20000,"initialDate":"2026/01/01","transactionTotal":3000,"currentBalance":23000,"txCount":3},{"name":"中信信用卡","type":"信用卡","currency":"TWD","initialBalance":0,"initialDate":"2026/01/01","transactionTotal":-45678,"currentBalance":-45678,"txCount":12}],"transferCandidates":[{"id":"c1","date":"2026/09/05","account":"銀行","item":"轉帳","amount":3000,"currency":"TWD"},{"id":"c2","date":"2026/09/06","account":"玉山","item":"","amount":3000,"currency":"TWD"}]};
+var __mockData = {"bootstrap":{"today":"2026/09/07","accounts":[{"name":"現金","currency":"TWD","type":"現金"},{"name":"銀行","currency":"TWD","type":"銀行"},{"name":"玉山","currency":"TWD","type":"銀行"},{"name":"中信信用卡","currency":"TWD","type":"信用卡"}],"expenseCategories":[{"name":"飲食","icon":"🍚","color":"#FF7043"},{"name":"交通","icon":"🚗","color":"#3F7CFF"},{"name":"娛樂","icon":"🎮","color":"#43A047"}],"incomeCategories":[{"name":"薪資","icon":"💰","color":"#8E24AA"}]},"transactions":[],"stats":{"2026-09|支出":{"total":6000,"byCategory":[{"name":"飲食","amount":3000,"ratio":0.5},{"name":"交通","amount":2000,"ratio":0.3333},{"name":"娛樂","amount":1000,"ratio":0.1667}]},"2026-09|支出|現金":{"total":500,"byCategory":[{"name":"飲食","amount":500,"ratio":1}]},"2026-09|收入":{"total":40000,"byCategory":[{"name":"薪資","amount":40000,"ratio":1}]}},"balances":[{"name":"現金","type":"現金","currency":"TWD","initialBalance":1000,"initialDate":"2026/01/01","transactionTotal":500,"currentBalance":1500,"txCount":5},{"name":"銀行","type":"銀行","currency":"TWD","initialBalance":50000,"initialDate":"2026/01/01","transactionTotal":-2000,"currentBalance":48000,"txCount":8},{"name":"玉山","type":"銀行","currency":"TWD","initialBalance":20000,"initialDate":"2026/01/01","transactionTotal":3000,"currentBalance":23000,"txCount":3},{"name":"中信信用卡","type":"信用卡","currency":"TWD","initialBalance":0,"initialDate":"2026/01/01","transactionTotal":-45678,"currentBalance":-45678,"txCount":12}],"transferCandidates":[{"id":"c1","date":"2026/09/05","account":"銀行","item":"轉帳","amount":3000,"currency":"TWD"},{"id":"c2","date":"2026/09/06","account":"玉山","item":"","amount":3000,"currency":"TWD"}]};
 window.__mockApi = function (name, args) {
   var data = __mockData;
   if (name === 'apiBootstrap') return data.bootstrap;
   if (name === 'apiListTransactions') return data.transactions;
   if (name === 'apiStats') {
-    var ym = args[1], type = args[2];
-    return data.stats[ym + '|' + type] || { total: 0, byCategory: [] };
+    var ym = args[1], type = args[2], acct = args[3] || '';
+    var key = ym + '|' + type + (acct ? '|' + acct : '');
+    return data.stats[key] || { total: 0, byCategory: [] };
   }
   if (name === 'apiBalances') return data.balances;
   if (name === 'apiSaveAccount') {
@@ -1035,6 +1046,18 @@ window.__mockApi = function (name, args) {
     return String(s).replace(/-/g, '/');
   }
 
+  // 彙總交易的支出／收入合計與筆數（供紀錄頁帳戶篩選的標題列）
+  function sumByType(txs) {
+    var out = { expense: 0, income: 0, count: 0 };
+    (txs || []).forEach(function (t) {
+      var a = Math.abs(Number(t.amount) || 0);
+      if (t.type === '支出' || t.type === 'expense') { out.expense += a; }
+      else if (t.type === '收入' || t.type === 'income') { out.income += a; }
+      out.count++;
+    });
+    return out;
+  }
+
   window.CL = {
     evalCalc: evalCalc,
     applyKey: applyKey,
@@ -1049,7 +1072,8 @@ window.__mockApi = function (name, args) {
     inferYearMonthLabel: inferYearMonthLabel,
     toIsoDate: toIsoDate,
     fromIsoDate: fromIsoDate,
-    percent: percent
+    percent: percent,
+    sumByType: sumByType
   };
 })();
 </script>
@@ -1074,7 +1098,8 @@ window.__mockApi = function (name, args) {
     catsPanel: null,
     catSheet: null,
     editing: null,
-    filterCategory: ''
+    filterCategory: '',
+    filterAccount: ''
   };
 
   var TABS = [
@@ -1687,12 +1712,12 @@ window.__mockApi = function (name, args) {
   /* ---------------- 統計分頁（Task 8） ---------------- */
 
   function statsKey() {
-    return state.yearMonth + '|' + state.statsType;
+    return state.yearMonth + '|' + state.statsType + '|' + state.filterAccount;
   }
 
   function loadStats() {
     var key = statsKey();
-    return api('apiStats', state.yearMonth, state.statsType).then(function (result) {
+    return api('apiStats', state.yearMonth, state.statsType, state.filterAccount).then(function (result) {
       state.stats[key] = result;
     });
   }
@@ -1856,16 +1881,30 @@ window.__mockApi = function (name, args) {
 
     var html = '';
     html += renderMonthNav();
-
-    if (state.filterCategory) {
-      html += '<div class="filter-bar"><span class="chip">' + esc(state.filterCategory) +
-        ' <span class="x" data-action="clear-filter">✕</span></span></div>';
-    }
+    html += renderAccountFilter();
 
     var txs = state.transactions || [];
-    var filtered = state.filterCategory
-      ? txs.filter(function (t) { return t.category === state.filterCategory; })
-      : txs;
+    var filtered = txs;
+    if (state.filterAccount) {
+      filtered = filtered.filter(function (t) { return sameAccount(t.account, state.filterAccount); });
+      html += '<div class="filter-sum">' + renderAccountSum(filtered) + '</div>';
+    }
+
+    if (state.filterCategory || state.filterAccount) {
+      html += '<div class="filter-bar">';
+      if (state.filterCategory) {
+        html += '<span class="chip">' + esc(state.filterCategory) +
+          ' <span class="x" data-action="clear-filter">✕</span></span>';
+      }
+      if (state.filterAccount) {
+        html += '<span class="chip">帳戶：' + esc(state.filterAccount) +
+          ' <span class="x" data-action="clear-account-filter">✕</span></span>';
+      }
+      html += '</div>';
+    }
+    if (state.filterCategory) {
+      filtered = filtered.filter(function (t) { return t.category === state.filterCategory; });
+    }
 
     if (filtered.length === 0) {
       html += '<div class="empty">本月尚無交易紀錄</div>';
@@ -1917,6 +1956,52 @@ window.__mockApi = function (name, args) {
       '</div>' +
       '<div class="amt ' + cls + '">' + sign + esc(CL.formatMoney(item.amount, item.currency)) + '</div>' +
       '</div>';
+  }
+
+  function normName(n) {
+    return String(n == null ? '' : n).replace(/[\s\u3000]/g, '').toLowerCase();
+  }
+
+  function sameAccount(a, b) {
+    return normName(a) === normName(b);
+  }
+
+  function renderAccountSum(txs) {
+    var sum = CL.sumByType(txs);
+    return '本月 支出 ' + esc(CL.formatMoney(sum.expense, 'TWD')) + ' ／ 收入 ' +
+      esc(CL.formatMoney(sum.income, 'TWD')) + '（' + sum.count + ' 筆）';
+  }
+
+  function renderAccountFilter() {
+    var accs = (state.bootstrap && state.bootstrap.accounts) || [];
+    var assets = accs.filter(function (a) { return a.type !== '信用卡'; });
+    var cards = accs.filter(function (a) { return a.type === '信用卡'; });
+    function opts(list) {
+      return list.map(function (a) {
+        return '<option value="' + esc(a.name) + '"' + (a.name === state.filterAccount ? ' selected' : '') + '>' +
+          esc(a.name) + '</option>';
+      }).join('');
+    }
+    var html = '<div class="account-filter"><select data-action="account-filter">' +
+      '<option value=""' + (state.filterAccount ? '' : ' selected') + '>全部帳戶</option>';
+    if (assets.length) { html += '<optgroup label="資產">' + opts(assets) + '</optgroup>'; }
+    if (cards.length) { html += '<optgroup label="信用卡">' + opts(cards) + '</optgroup>'; }
+    html += '</select></div>';
+    return html;
+  }
+
+  function onAppChange(e) {
+    var el = e.target;
+    if (!el || !el.getAttribute || el.getAttribute('data-action') !== 'account-filter') { return; }
+    state.filterAccount = el.value || '';
+    state.stats = {};
+    render();
+    if (state.tab === 'stats') {
+      loadStats().then(render).catch(function (err) {
+        toast((err && err.message) || String(err), true);
+        render();
+      });
+    }
   }
 
   function renderMonthNav() {
@@ -1984,6 +2069,7 @@ window.__mockApi = function (name, args) {
 
     var html = '';
     html += renderMonthNav();
+    html += renderAccountFilter();
     html += renderStatsSegment();
 
     var data = state.stats[statsKey()];
@@ -2013,7 +2099,8 @@ window.__mockApi = function (name, args) {
       html += '<path d="' + s.d + '" fill="' + esc(s.color) + '" stroke="#fff" stroke-width="1"></path>';
     });
     html += '<circle cx="100" cy="100" r="55" fill="#fff"></circle>';
-    html += '<text x="100" y="94" text-anchor="middle" font-size="13" fill="#8A8F98">' + esc(state.statsType) + '</text>';
+    html += '<text x="100" y="94" text-anchor="middle" font-size="13" fill="#8A8F98">' +
+      esc(state.filterAccount ? state.filterAccount : state.statsType) + '</text>';
     html += '<text x="100" y="115" text-anchor="middle" font-size="17" font-weight="700">' +
       esc(CL.formatMoney(data.total, 'TWD')) + '</text>';
     html += '</svg></div>';
@@ -2247,6 +2334,10 @@ window.__mockApi = function (name, args) {
     } else if (action === 'clear-filter') {
       state.filterCategory = '';
       render();
+    } else if (action === 'clear-account-filter') {
+      state.filterAccount = '';
+      state.stats = {};
+      render();
     } else if (action === 'stats-type') {
       var newStatsType = el.getAttribute('data-type');
       if (newStatsType !== state.statsType) {
@@ -2338,7 +2429,10 @@ window.__mockApi = function (name, args) {
 
   document.addEventListener('DOMContentLoaded', function () {
     var app = document.getElementById('app');
-    if (app) { app.addEventListener('click', onAppClick); }
+    if (app) {
+      app.addEventListener('click', onAppClick);
+      app.addEventListener('change', onAppChange);
+    }
     ensureEditorContainer();
     init();
   });

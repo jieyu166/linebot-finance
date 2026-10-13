@@ -76,6 +76,13 @@ t('App.html 含統計分頁必要字串：renderStats、apiStats、pieSlices、s
   });
 });
 
+t('App.html 含帳戶篩選必要字串', () => {
+  var body = extractScriptBody(readSrc('App.html')) + readSrc('ClientLogic.html');
+  ['account-filter', 'filterAccount', 'CL.sumByType', 'clear-account-filter'].forEach(function (needle) {
+    assert.ok(body.indexOf(needle) !== -1, '缺少字串: ' + needle);
+  });
+});
+
 t('Index.html 包含三個 include 與 #app', () => {
   var html = readSrc('Index.html');
   assert.ok(html.indexOf("include('Styles')") !== -1, '缺少 include(\'Styles\')');

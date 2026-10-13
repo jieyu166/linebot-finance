@@ -163,4 +163,11 @@ t('percent 四捨五入為整數百分比字串', () => {
   assert.strictEqual(CL.percent(0), '0%');
 });
 
+t('sumByType 彙總支出／收入／筆數', () => {
+  assert.deepStrictEqual(CL.sumByType([
+    { type: '支出', amount: 100 }, { type: 'expense', amount: -50 }, { type: '收入', amount: 30 }
+  ]), { expense: 150, income: 30, count: 3 });
+  assert.deepStrictEqual(CL.sumByType([]), { expense: 0, income: 0, count: 0 });
+});
+
 process.exit(failed ? 1 : 0);

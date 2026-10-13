@@ -32,13 +32,16 @@ function filterTransactionsByMonth(txs, yearMonth) {
  * 依分類彙總指定類型交易的金額與占比，排除已配對轉帳的列
  * @param {Object[]} txs - 交易物件陣列
  * @param {string} type - '支出' 或 '收入'
+ * @param {string} [account] - 可選；非空時只計入 normalizeName 後相符的帳戶
  * @returns {Object} { total, byCategory:[{name, amount, ratio}] }，byCategory 依 amount 降冪
  */
-function summarizeByCategory(txs, type) {
+function summarizeByCategory(txs, type, account) {
+  var accKey = account ? normalizeName(account) : '';
   var totals = {};
   var total = 0;
   txs.forEach(function(tx) {
     if (tx.type !== type || tx.transferId) { return; }
+    if (accKey && normalizeName(tx.account) !== accKey) { return; }
     var amount = Math.abs(parseAmount(tx.amount));
     totals[tx.category] = (totals[tx.category] || 0) + amount;
     total += amount;

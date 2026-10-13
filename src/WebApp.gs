@@ -249,14 +249,15 @@ function apiTransferCandidates(auth, id, ss) {
  * @param {string} auth - 權限權杖
  * @param {string} yearMonth - 'yyyy-MM'
  * @param {string} type - '支出' 或 '收入'
+ * @param {string} [account] - 可選的帳戶名稱篩選
  * @param {Spreadsheet} [ss] - 可選的試算表物件
  * @returns {Object} { total, byCategory }
  */
-function apiStats(auth, yearMonth, type, ss) {
+function apiStats(auth, yearMonth, type, account, ss) {
   try {
     requireWebAppAccess(auth);
     ss = getSpreadsheet(ss);
-    return summarizeByCategory(filterTransactionsByMonth(loadAllTransactions_(ss), yearMonth), type);
+    return summarizeByCategory(filterTransactionsByMonth(loadAllTransactions_(ss), yearMonth), type, account);
   } catch (e) {
     throw new Error(e && e.message ? e.message : String(e));
   }

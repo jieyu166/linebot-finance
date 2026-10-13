@@ -182,9 +182,20 @@ t('apiStats 串接 filterTransactionsByMonth + summarizeByCategory', () => {
     ['2026/08/01', '', '現金', '支出', '飲食', '', '', 'TWD', 999, 'App', 'c', '']
   ]);
   const ss = baseSs({ '交易紀錄': txSheet });
-  const out = gs.apiStats('tok', '2026-09', '支出', ss);
+  const out = gs.apiStats('tok', '2026-09', '支出', '', ss);
   assert.strictEqual(out.total, 400);
   assert.deepStrictEqual(out.byCategory, [{ name: '飲食', amount: 300, ratio: 0.75 }, { name: '交通', amount: 100, ratio: 0.25 }]);
+});
+
+t('apiStats 帶 account 只計該帳戶', () => {
+  const txSheet = fakeSheet([
+    ['2026/09/01', '', '現金', '支出', '飲食', '', '', 'TWD', 300, 'App', 'a', ''],
+    ['2026/09/02', '', '銀行', '支出', '交通', '', '', 'TWD', 100, 'App', 'b', '']
+  ]);
+  const ss = baseSs({ '交易紀錄': txSheet });
+  const out = gs.apiStats('tok', '2026-09', '支出', '銀行', ss);
+  assert.strictEqual(out.total, 100);
+  assert.deepStrictEqual(out.byCategory, [{ name: '交通', amount: 100, ratio: 1 }]);
 });
 
 t('apiBudgetUsage 串接 getBudgets + summarizeBudgetUsage', () => {

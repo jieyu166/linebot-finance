@@ -18,7 +18,8 @@
     catsPanel: null,
     catSheet: null,
     editing: null,
-    filterCategory: ''
+    filterCategory: '',
+    filterAccount: ''
   };
 
   var TABS = [
@@ -631,12 +632,12 @@
   /* ---------------- 統計分頁（Task 8） ---------------- */
 
   function statsKey() {
-    return state.yearMonth + '|' + state.statsType;
+    return state.yearMonth + '|' + state.statsType + '|' + state.filterAccount;
   }
 
   function loadStats() {
     var key = statsKey();
-    return api('apiStats', state.yearMonth, state.statsType).then(function (result) {
+    return api('apiStats', state.yearMonth, state.statsType, state.filterAccount).then(function (result) {
       state.stats[key] = result;
     });
   }
@@ -800,16 +801,30 @@
 
     var html = '';
     html += renderMonthNav();
-
-    if (state.filterCategory) {
-      html += '<div class="filter-bar"><span class="chip">' + esc(state.filterCategory) +
-        ' <span class="x" data-action="clear-filter">✕</span></span></div>';
-    }
+    html += renderAccountFilter();
 
     var txs = state.transactions || [];
-    var filtered = state.filterCategory
-      ? txs.filter(function (t) { return t.category === state.filterCategory; })
-      : txs;
+    var filtered = txs;
+    if (state.filterAccount) {
+      filtered = filtered.filter(function (t) { return sameAccount(t.account, state.filterAccount); });
+      html += '<div class="filter-sum">' + renderAccountSum(filtered) + '</div>';
+    }
+
+    if (state.filterCategory || state.filterAccount) {
+      html += '<div class="filter-bar">';
+      if (state.filterCategory) {
+        html += '<span class="chip">' + esc(state.filterCategory) +
+          ' <span class="x" data-action="clear-filter">✕</span></span>';
+      }
+      if (state.filterAccount) {
+        html += '<span class="chip">帳戶：' + esc(state.filterAccount) +
+          ' <span class="x" data-action="clear-account-filter">✕</span></span>';
+      }
+      html += '</div>';
+    }
+    if (state.filterCategory) {
+      filtered = filtered.filter(function (t) { return t.category === state.filterCategory; });
+    }
 
     if (filtered.length === 0) {
       html += '<div class="empty">本月尚無交易紀錄</div>';
@@ -861,6 +876,52 @@
       '</div>' +
       '<div class="amt ' + cls + '">' + sign + esc(CL.formatMoney(item.amount, item.currency)) + '</div>' +
       '</div>';
+  }
+
+  function normName(n) {
+    return String(n == null ? '' : n).replace(/[\s\u3000]/g, '').toLowerCase();
+  }
+
+  function sameAccount(a, b) {
+    return normName(a) === normName(b);
+  }
+
+  function renderAccountSum(txs) {
+    var sum = CL.sumByType(txs);
+    return '本月 支出 ' + esc(CL.formatMoney(sum.expense, 'TWD')) + ' ／ 收入 ' +
+      esc(CL.formatMoney(sum.income, 'TWD')) + '（' + sum.count + ' 筆）';
+  }
+
+  function renderAccountFilter() {
+    var accs = (state.bootstrap && state.bootstrap.accounts) || [];
+    var assets = accs.filter(function (a) { return a.type !== '信用卡'; });
+    var cards = accs.filter(function (a) { return a.type === '信用卡'; });
+    function opts(list) {
+      return list.map(function (a) {
+        return '<option value="' + esc(a.name) + '"' + (a.name === state.filterAccount ? ' selected' : '') + '>' +
+          esc(a.name) + '</option>';
+      }).join('');
+    }
+    var html = '<div class="account-filter"><select data-action="account-filter">' +
+      '<option value=""' + (state.filterAccount ? '' : ' selected') + '>全部帳戶</option>';
+    if (assets.length) { html += '<optgroup label="資產">' + opts(assets) + '</optgroup>'; }
+    if (cards.length) { html += '<optgroup label="信用卡">' + opts(cards) + '</optgroup>'; }
+    html += '</select></div>';
+    return html;
+  }
+
+  function onAppChange(e) {
+    var el = e.target;
+    if (!el || !el.getAttribute || el.getAttribute('data-action') !== 'account-filter') { return; }
+    state.filterAccount = el.value || '';
+    state.stats = {};
+    render();
+    if (state.tab === 'stats') {
+      loadStats().then(render).catch(function (err) {
+        toast((err && err.message) || String(err), true);
+        render();
+      });
+    }
   }
 
   function renderMonthNav() {
@@ -928,6 +989,7 @@
 
     var html = '';
     html += renderMonthNav();
+    html += renderAccountFilter();
     html += renderStatsSegment();
 
     var data = state.stats[statsKey()];
@@ -957,7 +1019,8 @@
       html += '<path d="' + s.d + '" fill="' + esc(s.color) + '" stroke="#fff" stroke-width="1"></path>';
     });
     html += '<circle cx="100" cy="100" r="55" fill="#fff"></circle>';
-    html += '<text x="100" y="94" text-anchor="middle" font-size="13" fill="#8A8F98">' + esc(state.statsType) + '</text>';
+    html += '<text x="100" y="94" text-anchor="middle" font-size="13" fill="#8A8F98">' +
+      esc(state.filterAccount ? state.filterAccount : state.statsType) + '</text>';
     html += '<text x="100" y="115" text-anchor="middle" font-size="17" font-weight="700">' +
       esc(CL.formatMoney(data.total, 'TWD')) + '</text>';
     html += '</svg></div>';
@@ -1191,6 +1254,10 @@
     } else if (action === 'clear-filter') {
       state.filterCategory = '';
       render();
+    } else if (action === 'clear-account-filter') {
+      state.filterAccount = '';
+      state.stats = {};
+      render();
     } else if (action === 'stats-type') {
       var newStatsType = el.getAttribute('data-type');
       if (newStatsType !== state.statsType) {
@@ -1282,7 +1349,10 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     var app = document.getElementById('app');
-    if (app) { app.addEventListener('click', onAppClick); }
+    if (app) {
+      app.addEventListener('click', onAppClick);
+      app.addEventListener('change', onAppChange);
+    }
     ensureEditorContainer();
     init();
   });

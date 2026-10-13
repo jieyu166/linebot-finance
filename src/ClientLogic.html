@@ -254,6 +254,18 @@
     return String(s).replace(/-/g, '/');
   }
 
+  // 彙總交易的支出／收入合計與筆數（供紀錄頁帳戶篩選的標題列）
+  function sumByType(txs) {
+    var out = { expense: 0, income: 0, count: 0 };
+    (txs || []).forEach(function (t) {
+      var a = Math.abs(Number(t.amount) || 0);
+      if (t.type === '支出' || t.type === 'expense') { out.expense += a; }
+      else if (t.type === '收入' || t.type === 'income') { out.income += a; }
+      out.count++;
+    });
+    return out;
+  }
+
   window.CL = {
     evalCalc: evalCalc,
     applyKey: applyKey,
@@ -268,7 +280,8 @@
     inferYearMonthLabel: inferYearMonthLabel,
     toIsoDate: toIsoDate,
     fromIsoDate: fromIsoDate,
-    percent: percent
+    percent: percent,
+    sumByType: sumByType
   };
 })();
 </script>

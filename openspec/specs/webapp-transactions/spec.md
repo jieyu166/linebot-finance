@@ -161,6 +161,11 @@ The system SHALL provide `apiStats(yearMonth, type, ss)` returning `summarizeByC
 - **WHEN** a month has 支出 totals of 3000 (飲食) and 1000 (交通), both unpaired
 - **THEN** `apiStats` returns `total: 4000` and `byCategory` `[{ name: '飲食', amount: 3000, ratio: 0.75 }, { name: '交通', amount: 1000, ratio: 0.25 }]`
 
+#### Scenario: Account filter restricts stats to one account
+
+- **WHEN** a month has 支出 rows on 現金 (飲食 300) and 銀行 (交通 100), and `apiStats(yearMonth, '支出', '銀行', ss)` is called (optional `account` argument, matched via `normalizeName`)
+- **THEN** only the 銀行 row is counted: `total: 100`, `byCategory` `[{ name: '交通', amount: 100, ratio: 1 }]`; an empty `account` counts all accounts
+
 ---
 ### Requirement: Update account settings from the app
 
